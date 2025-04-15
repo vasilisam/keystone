@@ -1,0 +1,68 @@
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 8cbe6e5f9c..49e39986ff 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -533,18 +533,18 @@ static void pmu_sbi_set_scounteren(void *arg)
+ {
+ 	struct perf_event *event = (struct perf_event *)arg;
+ 
+-	if (event->hw.idx != -1)
+-		csr_write(CSR_SCOUNTEREN,
+-			  csr_read(CSR_SCOUNTEREN) | BIT(pmu_sbi_csr_index(event)));
++//	if (event->hw.idx != -1)
++//		csr_write(CSR_SCOUNTEREN,
++//			  csr_read(CSR_SCOUNTEREN) | BIT(pmu_sbi_csr_index(event)));
+ }
+ 
+ static void pmu_sbi_reset_scounteren(void *arg)
+ {
+ 	struct perf_event *event = (struct perf_event *)arg;
+ 
+-	if (event->hw.idx != -1)
+-		csr_write(CSR_SCOUNTEREN,
+-			  csr_read(CSR_SCOUNTEREN) & ~BIT(pmu_sbi_csr_index(event)));
++//	if (event->hw.idx != -1)
++//		csr_write(CSR_SCOUNTEREN,
++//			  csr_read(CSR_SCOUNTEREN) & ~BIT(pmu_sbi_csr_index(event)));
+ }
+ 
+ static void pmu_sbi_ctr_start(struct perf_event *event, u64 ival)
+@@ -793,10 +793,10 @@ static int pmu_sbi_starting_cpu(unsigned int cpu, struct hlist_node *node)
+ 	 * We keep enabling userspace access to CYCLE, TIME and INSTRET via the
+ 	 * legacy option but that will be removed in the future.
+ 	 */
+-	if (sysctl_perf_user_access == SYSCTL_LEGACY)
+-		csr_write(CSR_SCOUNTEREN, 0x7);
+-	else
+-		csr_write(CSR_SCOUNTEREN, 0x2);
++//	if (sysctl_perf_user_access == SYSCTL_LEGACY)
++//		csr_write(CSR_SCOUNTEREN, 0x7);
++//	else
++	csr_write(CSR_SCOUNTEREN, -1);
+ 
+ 	/* Stop all the counters so that they can be enabled from perf */
+ 	pmu_sbi_stop_all(pmu);
+@@ -817,7 +817,7 @@ static int pmu_sbi_dying_cpu(unsigned int cpu, struct hlist_node *node)
+ 	}
+ 
+ 	/* Disable all counters access for user mode now */
+-	csr_write(CSR_SCOUNTEREN, 0x0);
++	csr_write(CSR_SCOUNTEREN, -1);
+ 
+ 	return 0;
+ }
+@@ -1007,10 +1007,10 @@ static void pmu_sbi_event_unmapped(struct perf_event *event, struct mm_struct *m
+ 
+ static void riscv_pmu_update_counter_access(void *info)
+ {
+-	if (sysctl_perf_user_access == SYSCTL_LEGACY)
+-		csr_write(CSR_SCOUNTEREN, 0x7);
+-	else
+-		csr_write(CSR_SCOUNTEREN, 0x2);
++//	if (sysctl_perf_user_access == SYSCTL_LEGACY)
++//		csr_write(CSR_SCOUNTEREN, 0x7);
++//	else
++//		csr_write(CSR_SCOUNTEREN, 0x2);
+ }
+ 
+ static int riscv_pmu_proc_user_access_handler(struct ctl_table *table,
