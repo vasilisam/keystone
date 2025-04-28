@@ -24,6 +24,7 @@
 #define MSG(str) \
   "[Keystone SDK] " __FILE__ ":" BOOST_STRINGIZE(__LINE__) " : " str
 #define ERROR(str, ...) fprintf(stderr, MSG(str) "\n", ##__VA_ARGS__)
+#define INFO(str, ...) fprintf(stdout, MSG(str) "\n", ##__VA_ARGS__)
 #define PERROR(str) perror(MSG(str))
 #define IS_ALIGNED(x, align) (!((x) & (align - 1)))
 

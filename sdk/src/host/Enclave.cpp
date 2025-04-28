@@ -185,6 +185,9 @@ Enclave::init(
   copyFile((uintptr_t) runtimeFile->getPtr(), runtimeFile->getFileSize());
 
   pMemory->startEappMem();
+  //added code
+  INFO("[Keystone] EApp memory region started at offset: 0x%lx\n", pMemory->getCurrentOffset());
+
   copyFile((uintptr_t) enclaveFile->getPtr(), enclaveFile->getFileSize());
 
   pMemory->startFreeMem();
