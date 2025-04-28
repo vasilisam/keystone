@@ -1,0 +1,13 @@
+diff --git a/lib/sbi/sbi_hart.c b/lib/sbi/sbi_hart.c
+index de86fee..83f8d2c 100644
+--- a/lib/sbi/sbi_hart.c
++++ b/lib/sbi/sbi_hart.c
+@@ -60,7 +60,7 @@ static void mstatus_init(struct sbi_scratch *scratch)
+ 	/* Disable user mode usage of all perf counters except default ones (CY, TM, IR) */
+ 	if (misa_extension('S') &&
+ 	    sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_10)
+-		csr_write(CSR_SCOUNTEREN, 7);
++		csr_write(CSR_SCOUNTEREN, -1);
+ 
+ 	/**
+ 	 * OpenSBI doesn't use any PMU counters in M-mode.
