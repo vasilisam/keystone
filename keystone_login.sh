@@ -2,7 +2,7 @@
 
 spawn make run
 
-set timeout 12
+set timeout 15
 #Wait for login and password prompt
 expect "login:"
 send "root\r"
