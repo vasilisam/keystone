@@ -23,6 +23,7 @@ void map_physical_memory(uintptr_t dram_base, uintptr_t dram_size) {
   uintptr_t ptr = EYRIE_LOAD_START;
   /* load address should not override kernel address */
   assert(RISCV_GET_PT_INDEX(ptr, 1) != RISCV_GET_PT_INDEX(RUNTIME_VA_START, 1));
+  printf("[loader] Start mapping EPM physical memory.\n");
   map_with_reserved_page_table(dram_base, dram_size,
       ptr, load_l2_page_table_storage, load_l3_page_table_storage);
 }
@@ -48,11 +49,16 @@ int load_runtime(uintptr_t dummy,
 
   root_page_table = root_page_table_storage;
 
+  printf("[loader] root_page_table: 0x%lx-0x%lx\n", (uintptr_t) root_page_table_storage, (uintptr_t) root_page_table_storage + RISCV_PAGE_SIZE);
+  printf("[loader] l2_page_table  : 0x%lx-0x%lx\n", (uintptr_t) load_l2_page_table_storage, (uintptr_t) load_l2_page_table_storage + RISCV_PAGE_SIZE);
+  printf("[loader] l3_page_table  : 0x%lx-0x%lx\n", (uintptr_t) load_l3_page_table_storage, (uintptr_t) load_l3_page_table_storage + RISCV_PAGE_SIZE);
+ 
   // initialize freemem
   spa_init(free_base, dram_base + dram_size - free_base);
 
   // validate runtime elf 
   size_t runtime_size = user_base - runtime_base;
+
   if (((void*) runtime_base == NULL) || (runtime_size <= 0)) {
     return -1; 
   }
@@ -63,6 +69,10 @@ int load_runtime(uintptr_t dummy,
   if (ret != 0) {
     return ret;
   }
+  
+  printf("[loader] Before loading RT elf (%zu B)\n", runtime_size);
+  printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
+  
 
   // map runtime memory
   ret = loadElf(&runtime_elf, 0);
@@ -70,9 +80,16 @@ int load_runtime(uintptr_t dummy,
     return ret;
   }
 
+  //print_page_table_recursive(root_page_table_storage, 2, 0);
+  
+  printf("[loader] After loading RT elf ....\n");
+  printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
+  
   // map enclave physical memory, so that runtime will be able to access all memory
   map_physical_memory(dram_base, dram_size);
 
+  printf("After mapping EPM....\n");
+  printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
   // map untrusted memory
   ret = map_untrusted_memory(untrusted_ptr, untrusted_size);
   if (ret != 0) {
@@ -80,7 +97,8 @@ int load_runtime(uintptr_t dummy,
   }
 
   free_base_final = dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE;
-
+  printf("After mapping Untrusted Memory....\n");
+  printf("[loader] FreeMem: 0x%lx-0x%lx\n", (uintptr_t) free_base_final, (uintptr_t) dram_base + dram_size);
   return ret;
 }
 

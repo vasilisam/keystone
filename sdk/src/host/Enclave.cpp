@@ -177,7 +177,7 @@ Enclave::init(
     destroy();
     return Error::DeviceError;
   }
-	
+
   /* Copy loader into beginning of enclave memory */
   copyFile((uintptr_t) loaderFile->getPtr(), loaderFile->getFileSize());
 
@@ -185,13 +185,9 @@ Enclave::init(
   copyFile((uintptr_t) runtimeFile->getPtr(), runtimeFile->getFileSize());
 
   pMemory->startEappMem();
-  //added code
-  INFO("[Keystone] EApp memory region started at offset: 0x%lx\n", pMemory->getCurrentOffset());
-
   copyFile((uintptr_t) enclaveFile->getPtr(), enclaveFile->getFileSize());
 
   pMemory->startFreeMem();
-
   if (pDevice->finalize(
           pMemory->getRuntimePhysAddr(), pMemory->getEappPhysAddr(),
           pMemory->getFreePhysAddr(), params.getFreeMemSize()) != Error::Success) {

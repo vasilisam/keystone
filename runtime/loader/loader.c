@@ -35,6 +35,8 @@ int loadElf(elf_t* elf, bool user) {
         return -1;
       }
       uintptr_t new_page = alloc_page(vpn(va), pt_mode);
+      if (user)
+        printf("[alloc_page]: VA 0x%lx → PA 0x%lx\n", va, __pa(new_page));
       if (!new_page)
         return -1;
       memcpy((void *) (new_page + RISCV_PAGE_OFFSET(va)), src, RISCV_PAGE_SIZE - RISCV_PAGE_OFFSET(va));
@@ -47,13 +49,21 @@ int loadElf(elf_t* elf, bool user) {
       uintptr_t src_pa = __pa((uintptr_t) src);
       if (!map_page(vpn(va), ppn(src_pa), pt_mode))
         return -1;
+      
+      if (user)
+        printf("[map_page]: VA 0x%lx → PA 0x%lx, VPN[2] = 0x%lx, VPN[1] = 0x%lx, VPN[0] = 0x%lx\n",
+               va, src_pa, RISCV_GET_PT_INDEX(va, 1), RISCV_GET_PT_INDEX(va, 2), RISCV_GET_PT_INDEX(va, 3));
+
       src += RISCV_PAGE_SIZE;
       va += RISCV_PAGE_SIZE;
+      
     }
 
     /* load the .bss segments */
     while (va < memory_end) {
       uintptr_t new_page = alloc_page(vpn(va), pt_mode);
+      if (user)
+        printf("[alloc_page]: VA 0x%lx → PA 0x%lx\n", va, __pa(new_page));
       if (!new_page)
         return -1;
       /* copy over non .bss part of the page if it's a part of the page */

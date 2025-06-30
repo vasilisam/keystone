@@ -64,12 +64,14 @@ init_user_stack_and_env(ELF(Ehdr) *hdr)
   uintptr_t stack_end = EYRIE_USER_STACK_END;
   size_t stack_count = EYRIE_USER_STACK_SIZE >> RISCV_PAGE_BITS;
 
+  printf("Eapp's stack %zu pages allocation\n", stack_count);
   // allocated stack pages right below the runtime
   count = alloc_pages(vpn(stack_end), stack_count,
       PTE_R | PTE_W | PTE_D | PTE_A | PTE_U);
 
   assert(count == stack_count);
 
+  printf("Eapp's stack allocation finished.\n");
   // setup user stack env/aux
   user_sp = setup_start(user_sp, hdr);
 
@@ -95,24 +97,31 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   runtime_va_start = (uintptr_t) &rt_base;
   kernel_offset = runtime_va_start - runtime_paddr;
 
-  debug("ROOT PAGE TABLE: 0x%lx", root_page_table);
-  debug("UTM : 0x%lx-0x%lx (%u KB)", utm_vaddr, utm_vaddr+utm_size, utm_size/1024);
-  debug("DRAM: 0x%lx-0x%lx (%u KB)", dram_base, dram_base + dram_size, dram_size/1024);
-  debug("USER: 0x%lx-0x%lx (%u KB)", user_paddr, free_paddr, (free_paddr-user_paddr)/1024);
+  printf("[runtime] root_page_table: 0x%lx-0x%lx\n", root_page_table, root_page_table);
+  printf("[runtime] UTM : 0x%lx-0x%lx (%u KB)\n", utm_vaddr, utm_vaddr+utm_size, utm_size/1024);
+  printf("[runtime] DRAM: 0x%lx-0x%lx (%u KB)\n", dram_base, dram_base + dram_size, dram_size/1024);
+  printf("[runtime] RT  : 0x%lx-0x%lx (%u KB)\n", runtime_paddr, user_paddr, (user_paddr-runtime_paddr)/1024);
+  printf("[runtime] Eapp: 0x%lx-0x%lx (%u KB)\n", user_paddr, free_paddr, (free_paddr-user_paddr)/1024);
 
   /* set trap vector */
   csr_write(stvec, &encl_trap_handler);
   freemem_va_start = __va(free_paddr);
   freemem_size = dram_base + dram_size - free_paddr;
 
-  debug("FREE: 0x%lx-0x%lx (%u KB), va 0x%lx", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
+  printf("[runtime] FreeMem: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
 
+  printf("[runtime] Next 2-MiB aligned FreeMem address at 0x%p-0x%p (%u KB)\n", MEGAPAGE_UP(free_paddr), dram_base + dram_size, (dram_base + dram_size - MEGAPAGE_UP(free_paddr))/1024);
+  
   /* initialize free memory */
   init_freemem();
 
   /* load eapp elf */
+  printf("[runtime] Start loading Eapp elf.\n");
   assert(!verify_and_load_elf_file(__va(user_paddr), free_paddr-user_paddr, true));
-
+  printf("[runtime] Stopped loading Eapp elf.\n");
+  
+  //print_page_table_recursive(root_page_table, 2, 0);
+  
   /* free leaking memory */
   // TODO: clean up after loader -- entire file no longer needed
   // TODO: load elf file doesn't map some pages; those can be re-used. runtime and eapp.
@@ -121,7 +130,9 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   //highest used addr. Instead we start partway through the anon space
   set_program_break(EYRIE_ANON_REGION_START + (1024 * 1024 * 1024));
 
+  
   #ifdef USE_PAGING
+  printf("Backing storage used for paging\n");
   init_paging(user_paddr, free_paddr);
   #endif /* USE_PAGING */
 
@@ -137,7 +148,9 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   /* Enable the FPU */
   csr_write(sstatus, csr_read(sstatus) | 0x6000);
 
-  debug("eyrie boot finished. drop to the user land ...");
+  print_page_table_recursive(root_page_table, 2, 0);
+
+  warn("boot finished. drop to the user land ...");
   /* booting all finished, droping to the user land */
   return;
 }

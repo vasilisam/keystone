@@ -11,6 +11,31 @@ __walk_create(pte* root, uintptr_t addr);
 /* Hacky storage of current u-mode break */
 static uintptr_t current_program_break;
 
+void print_page_table_recursive(pte* table, int level, uintptr_t vbase) {
+  for (int i = 0; i < 512; i++) {
+    if ((table[i] & PTE_V)) {//} && (table[i] & PTE_U)) {
+      uintptr_t vpn = vbase | ((uintptr_t)i << (RISCV_PAGE_BITS + RISCV_PT_INDEX_BITS * level));
+      //printf("L%d: VPN 0x%lx -> PTE 0x%lx ", level, vpn >> RISCV_PAGE_BITS, table[i]);
+
+      if (table[i] & (PTE_R | PTE_W | PTE_X)) {  // if it's a leaf (RWX present) in U-space
+        if (!(table[i] & PTE_U))
+          continue;   // skip kernel leaf mappings
+        uintptr_t ppn = pte_ppn(table[i]);
+        printf("L%d: VPN 0x%lx -> PTE 0x%lx ", level, vpn >> RISCV_PAGE_BITS, table[i]);
+        printf("-> PA 0x%lx\n", ppn << RISCV_PAGE_BITS);
+      } else {
+        //if it's an intermediate page table
+        uintptr_t next_table_pa = pte_ppn(table[i]) << RISCV_PAGE_BITS;
+        pte* next_table = (pte*)__va(next_table_pa);
+        printf("L%d: VPN 0x%lx -> PTE 0x%lx ", level, vpn >> RISCV_PAGE_BITS, table[i]);
+        printf("-> Next table @ PA 0x%lx (VA %p)\n", next_table_pa, next_table);
+        print_page_table_recursive(next_table, level - 1, vpn);
+      }
+    }
+  }
+}
+
+
 uintptr_t get_program_break()
 {
   return current_program_break;
@@ -29,6 +54,8 @@ __continue_walk_create(pte* root, uintptr_t addr, pte* pte)
 
   unsigned long free_ppn = ppn(__pa(new_page));
   *pte = ptd_create(free_ppn);
+
+  printf("Page allocated from FreeMem at 0x%llx\n", free_ppn << RISCV_PAGE_BITS);
   return __walk_create(root, addr);
 }
 
@@ -271,6 +298,7 @@ __map_with_reserved_page_table_64(uintptr_t dram_base,
     leaf_level = 2;
     leaf_pt = l2_pt;
   }
+  
   assert(dram_size <= RISCV_GET_LVL_PGSIZE(leaf_level - 1));
   assert(IS_ALIGNED(dram_base, RISCV_GET_LVL_PGSIZE_BITS(leaf_level)));
   assert(IS_ALIGNED(ptr, RISCV_GET_LVL_PGSIZE_BITS(leaf_level - 1)));
@@ -293,6 +321,8 @@ __map_with_reserved_page_table_64(uintptr_t dram_base,
     leaf_pt[RISCV_GET_PT_INDEX(ptr + offset, leaf_level)] =
       pte_create(ppn(dram_base + offset),
           PTE_R | PTE_W | PTE_X | PTE_A | PTE_D);
+
+    printf("[map EPM] VA: 0x%llx -> PA: 0x%llx\n", ptr + offset, dram_base + offset);
   }
 
 }
@@ -305,11 +335,14 @@ map_with_reserved_page_table(uintptr_t dram_base,
                              pte* l3_pt)
 {
   #if __riscv_xlen == 64
-  if (dram_size > RISCV_GET_LVL_PGSIZE(2))
+  if (dram_size > RISCV_GET_LVL_PGSIZE(2)) {
+    warn("DRAM SIZE > 2MiB");
     __map_with_reserved_page_table_64(dram_base, dram_size, ptr, l2_pt, 0);
-  else
+  } else {
+    warn("DRAM SIZE < 2MiB");
     __map_with_reserved_page_table_64(dram_base, dram_size, ptr, l2_pt, l3_pt);
-  #elif __riscv_xlen == 32
+  }
+    #elif __riscv_xlen == 32
   if (dram_size > RISCV_GET_LVL_PGSIZE(1))
     __map_with_reserved_page_table_32(dram_base, dram_size, ptr, 0);
   else

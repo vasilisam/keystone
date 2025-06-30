@@ -7,6 +7,7 @@
 
 uintptr_t translate(uintptr_t va);
 pte* pte_of_va(uintptr_t va);
+void print_page_table_recursive(pte* table, int level, uintptr_t vbase);
 uintptr_t map_page(uintptr_t vpn, uintptr_t ppn, int flags);
 uintptr_t alloc_page(uintptr_t vpn, int flags);
 uintptr_t realloc_page(uintptr_t vpn, int flags);

@@ -52,6 +52,7 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   /* If buddy allocator fails, we fall back to the CMA */
   if (!epm_vaddr) {
     epm->is_cma = 1;
+    pr_info("EPM is allocated within CMA");
     count = min_pages;
 
     epm_vaddr = (vaddr_t) dma_alloc_coherent(keystone_dev.this_device,
