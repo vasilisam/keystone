@@ -1,3 +1,7 @@
+# Define the mapping mode
+set(MAPPING_MODE "2MB_PAGES")
+message(STATUS "Selected mapping mode: ${MAPPING_MODE}")
+
 set(eapp_bin tlbtest)
 set(eapp_src eapp/tlbtest.c)
 set(host_bin tlbtest-runner)
@@ -10,6 +14,16 @@ set(eyrie_plugins "io_syscall linux_syscall env_setup")
 
 add_executable(${eapp_bin} ${eapp_src})
 target_link_libraries(${eapp_bin} "-static")
+
+# Define compile-time flags if MAPPING_MODE is non-default
+if(MAPPING_MODE STREQUAL "2MB_PAGES")
+  target_compile_definitions(${eapp_bin} PUBLIC MEGAPAGE_MAPPING)
+  target_link_options(${eapp_bin} PRIVATE -static -Wl,-z,norelro
+                                                -Wl,-z,max-page-size=0x200000)
+elseif(NOT MAPPING_MODE STREQUAL "4KB_PAGES")
+  message(FATAL_ERROR "Unknown MAPPING_MODE: ${MAPPING_MODE}")
+endif()
+
 
 # host
 

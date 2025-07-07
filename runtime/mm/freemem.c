@@ -56,7 +56,24 @@ __spa_get(bool zero)
 }
 
 uintptr_t spa_get() { return __spa_get(false); }
-uintptr_t spa_get_zero() { return __spa_get(true); }
+
+uintptr_t spa_get_zero() { 
+  return __spa_get(true); 
+}
+
+#ifdef MEGAPAGE_MAPPING
+uintptr_t spa_get_zero_megapage() {
+  uintptr_t megapage_start;
+  uintptr_t new_page;
+
+  for(int i = 0; i < 512; i++) {
+    new_page = spa_get_zero();
+    if (i == 0)
+      megapage_start = new_page;
+  }
+  return megapage_start;
+}
+#endif
 
 /* put a page to the simple page allocator */
 void

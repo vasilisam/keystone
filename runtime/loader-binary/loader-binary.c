@@ -30,6 +30,7 @@ void map_physical_memory(uintptr_t dram_base, uintptr_t dram_size) {
 
 int map_untrusted_memory(uintptr_t untrusted_ptr, uintptr_t untrusted_size) {
   uintptr_t va        = EYRIE_UNTRUSTED_START;
+  printf("[loader] Start mapping UTM physical memory.\n");
   while (va < EYRIE_UNTRUSTED_START + untrusted_size) {
     if (!map_page(vpn(va), ppn(untrusted_ptr), PTE_W | PTE_R | PTE_D)) {
       return -1;
@@ -80,7 +81,6 @@ int load_runtime(uintptr_t dummy,
     return ret;
   }
 
-  //print_page_table_recursive(root_page_table_storage, 2, 0);
   
   printf("[loader] After loading RT elf ....\n");
   printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);

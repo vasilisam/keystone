@@ -29,6 +29,20 @@ uintptr_t spa_get_zero()
   return new_page;
 }
 
+#ifdef MEGAPAGE_MAPPING
+uintptr_t spa_get_zero_megapage()
+{
+  if (freeBase >= freeEnd) {
+    return 0;
+  }
+  uintptr_t new_page = freeBase;
+  memset((void *) new_page, 0, RISCV_MEGAPAGE_SIZE);
+
+  freeBase += RISCV_MEGAPAGE_SIZE;
+  return new_page;
+}
+#endif
+
 void spa_put(uintptr_t page)
 {
   assert(false); // not implemented

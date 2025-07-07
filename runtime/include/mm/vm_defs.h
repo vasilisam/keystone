@@ -27,8 +27,16 @@
 #define ROUND_DOWN(n, b) (n & ~((2 << (b - 1)) - 1))
 #define PAGE_DOWN(n) ROUND_DOWN(n, RISCV_PAGE_BITS)
 #define PAGE_UP(n) ROUND_UP(n, RISCV_PAGE_BITS)
+
+//Macros for implementing 2MiB MEGAPAGEs 
+#define MEGAPAGE_MAPPING 1
+#ifdef  MEGAPAGE_MAPPING
+#define RISCV_MEGAPAGE_BITS RISCV_GET_LVL_PGSIZE_BITS(2)
+#define RISCV_MEGAPAGE_SIZE (1 << RISCV_MEGAPAGE_BITS)
+#define RISCV_MEGAPAGE_OFFSET(addr) (addr % RISCV_MEGAPAGE_SIZE)
 #define MEGAPAGE_DOWN(n) ROUND_DOWN(n, RISCV_GET_LVL_PGSIZE_BITS(2))
 #define MEGAPAGE_UP(n) ROUND_UP(n, RISCV_GET_LVL_PGSIZE_BITS(2))
+#endif
 
 /* Starting address of the enclave memory */
 

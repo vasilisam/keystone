@@ -6,7 +6,7 @@
 
 /* Page table utilities */
 static pte*
-__walk_create(pte* root, uintptr_t addr);
+__walk_create(pte* root, uintptr_t addr, int page_table_levels);
 
 /* Hacky storage of current u-mode break */
 static uintptr_t current_program_break;
@@ -21,20 +21,19 @@ void print_page_table_recursive(pte* table, int level, uintptr_t vbase) {
         if (!(table[i] & PTE_U))
           continue;   // skip kernel leaf mappings
         uintptr_t ppn = pte_ppn(table[i]);
-        printf("L%d: VPN 0x%lx -> PTE 0x%lx ", level, vpn >> RISCV_PAGE_BITS, table[i]);
+        printf("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
         printf("-> PA 0x%lx\n", ppn << RISCV_PAGE_BITS);
       } else {
         //if it's an intermediate page table
         uintptr_t next_table_pa = pte_ppn(table[i]) << RISCV_PAGE_BITS;
         pte* next_table = (pte*)__va(next_table_pa);
-        printf("L%d: VPN 0x%lx -> PTE 0x%lx ", level, vpn >> RISCV_PAGE_BITS, table[i]);
+        printf("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
         printf("-> Next table @ PA 0x%lx (VA %p)\n", next_table_pa, next_table);
         print_page_table_recursive(next_table, level - 1, vpn);
       }
     }
   }
 }
-
 
 uintptr_t get_program_break()
 {
@@ -47,7 +46,7 @@ void set_program_break(uintptr_t new_break)
 }
 
 static pte*
-__continue_walk_create(pte* root, uintptr_t addr, pte* pte)
+__continue_walk_create(pte* root, uintptr_t addr, pte* pte, int page_table_levels)
 {
   uintptr_t new_page = spa_get_zero();
   assert(new_page);
@@ -55,26 +54,31 @@ __continue_walk_create(pte* root, uintptr_t addr, pte* pte)
   unsigned long free_ppn = ppn(__pa(new_page));
   *pte = ptd_create(free_ppn);
 
-  printf("Page allocated from FreeMem at 0x%llx\n", free_ppn << RISCV_PAGE_BITS);
-  return __walk_create(root, addr);
+  printf("PTE is 0x%p in address 0x%p\n", *pte, pte);
+  printf("4KB-Page allocated from FreeMem at 0x%llx\n", free_ppn << RISCV_PAGE_BITS);
+  return __walk_create(root, addr, page_table_levels);
 }
 
 static pte*
-__walk_internal(pte* root, uintptr_t addr, int create)
+__walk_internal(pte* root, uintptr_t addr, int create, int page_table_levels)
 {
   pte* t = root;
   int i;
-  for (i = 1; i < RISCV_PT_LEVELS; i++)
+  for (i = 1; i < page_table_levels; i++)
   {
     size_t idx = RISCV_GET_PT_INDEX(addr, i);
 
+    if (page_table_levels == 2)
+      printf("Page Level: %d page table t = %p at index %zu\n", i, t, idx);
     if (!(t[idx] & PTE_V))
-      return create ? __continue_walk_create(root, addr, &t[idx]) : 0;
+      return create ? __continue_walk_create(root, addr, &t[idx], page_table_levels) : 0;
 
     t = (pte*) __va(pte_ppn(t[idx]) << RISCV_PAGE_BITS);
+    if (page_table_levels == 2)
+      printf("page table points to 0x%p\n", t);
   }
 
-  return &t[RISCV_GET_PT_INDEX(addr, RISCV_PT_LEVELS)];
+  return &t[RISCV_GET_PT_INDEX(addr, page_table_levels)];
 }
 
 /* walk the page table and return PTE
@@ -82,22 +86,22 @@ __walk_internal(pte* root, uintptr_t addr, int create)
 static pte*
 __walk(pte* root, uintptr_t addr)
 {
-  return __walk_internal(root, addr, 0);
+  return __walk_internal(root, addr, 0, 3);
 }
 
 /* walk the page table and return PTE
  * create the mapping if non exists */
 static pte*
-__walk_create(pte* root, uintptr_t addr)
+__walk_create(pte* root, uintptr_t addr, int page_table_levels)
 {
-  return __walk_internal(root, addr, 1);
+  return __walk_internal(root, addr, 1, page_table_levels);
 }
 
 /* Create a virtual memory mapping between a physical and virtual page */
 uintptr_t 
 map_page(uintptr_t vpn, uintptr_t ppn, int flags)
 {
-  pte* pte = __walk_create(root_page_table, vpn << RISCV_PAGE_BITS);
+  pte* pte = __walk_create(root_page_table, vpn << RISCV_PAGE_BITS, 3);
 
   // TODO: what is supposed to happen if page is already allocated?
   if (*pte & PTE_V) {
@@ -111,21 +115,29 @@ map_page(uintptr_t vpn, uintptr_t ppn, int flags)
 /* allocate a new page to a given vpn
  * returns VA of the page, (returns 0 if fails) */
 uintptr_t
-alloc_page(uintptr_t vpn, int flags)
+alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels)
 {
   uintptr_t page;
-  pte* pte = __walk_create(root_page_table, vpn << RISCV_PAGE_BITS);
+  pte* pte = __walk_create(root_page_table, vpn << RISCV_PAGE_BITS, page_table_levels);
 
   if (!pte)
     return 0;
 
 	/* if the page has been already allocated, return the page */
   if(*pte & PTE_V) {
-    return __va(*pte << RISCV_PAGE_BITS);
+    //return __va(*pte << RISCV_PAGE_BITS); // repo's code
+    return __va(pte_ppn(*pte) << RISCV_PAGE_BITS);
   }
 
 	/* otherwise, allocate one from the freemem */
-  page = spa_get_zero();
+#ifdef MEGAPAGE_MAPPING 
+  if (page_table_levels == 2) {
+    page = spa_get_zero_megapage();
+  } else
+#endif
+  {
+    page = spa_get_zero();
+  }
   assert(page);
 
   *pte = pte_create(ppn(__pa(page)), PTE_D | PTE_A | PTE_V | flags);
@@ -214,7 +226,7 @@ test_va_range(uintptr_t vpn, size_t count){
   unsigned int i;
   /* Validate the region */
   for (i = 0; i < count; i++) {
-    pte* pte = __walk_internal(root_page_table, (vpn+i) << RISCV_PAGE_BITS, 0);
+    pte* pte = __walk_internal(root_page_table, (vpn+i) << RISCV_PAGE_BITS, 0, 3);
     // If the page exists and is valid then we cannot use it
     if(pte && *pte){
       break;

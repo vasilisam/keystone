@@ -20,6 +20,7 @@ extern uintptr_t shared_buffer_size;
 /* initial memory layout */
 uintptr_t utm_base;
 size_t utm_size;
+size_t eapp_elf_size;
 
 /* defined in entry.S */
 extern void* encl_trap_handler;
@@ -39,7 +40,11 @@ int verify_and_load_elf_file(uintptr_t ptr, size_t file_size, bool is_eapp) {
   }
 
   // parse and load elf file
-  ret = loadElf(&elf_file, 1);
+  #ifdef MEGAPAGE_MAPPING
+    ret = loadElf_megapage(&elf_file, 1);
+  #else
+    ret = loadElf(&elf_file, 1);
+  #endif
 
   if (is_eapp) { // setup entry point
     uintptr_t entry = elf_getEntryPoint(&elf_file);
@@ -89,6 +94,11 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
            uintptr_t utm_vaddr,
            uintptr_t utm_size)
 {
+  #ifdef MEGAPAGE_MAPPING
+    printf("[runtime] 2MiB megapages used for loading and executing the Eapp.\n");
+  #else 
+    printf("[runtime] 4KiB pages used for loading and executing the Eapp.\n");
+  #endif
   /* set initial values */
   load_pa_start = dram_base;
   root_page_table = (pte*) __va(csr_read(satp) << RISCV_PAGE_BITS);
@@ -97,7 +107,8 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   runtime_va_start = (uintptr_t) &rt_base;
   kernel_offset = runtime_va_start - runtime_paddr;
 
-  printf("[runtime] root_page_table: 0x%lx-0x%lx\n", root_page_table, root_page_table);
+  printf("[runtime] root_page_table: 0x%lx-0x%lx\n", root_page_table, root_page_table + RISCV_PAGE_SIZE);
+  printf("%d\n", RISCV_PAGE_SIZE);
   printf("[runtime] UTM : 0x%lx-0x%lx (%u KB)\n", utm_vaddr, utm_vaddr+utm_size, utm_size/1024);
   printf("[runtime] DRAM: 0x%lx-0x%lx (%u KB)\n", dram_base, dram_base + dram_size, dram_size/1024);
   printf("[runtime] RT  : 0x%lx-0x%lx (%u KB)\n", runtime_paddr, user_paddr, (user_paddr-runtime_paddr)/1024);
@@ -110,17 +121,34 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   printf("[runtime] FreeMem: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
 
-  printf("[runtime] Next 2-MiB aligned FreeMem address at 0x%p-0x%p (%u KB)\n", MEGAPAGE_UP(free_paddr), dram_base + dram_size, (dram_base + dram_size - MEGAPAGE_UP(free_paddr))/1024);
+  eapp_elf_size = free_paddr - user_paddr;
+
+  printf("Initialize Free Memory\n");
   
+  // align Freemem to the next 2MiB-aligned address. That would be the 
+  // starting address of Eapp Elf to be loaded. Substract 4KB for the 
+  // leaf page table to be allocated
+  
+  #ifdef MEGAPAGE_MAPPING
+  free_paddr = MEGAPAGE_UP(free_paddr);
+  free_paddr -= RISCV_PAGE_SIZE;
+  freemem_va_start = __va(free_paddr);
+  freemem_size = dram_base + dram_size - free_paddr;
+  #endif
+
   /* initialize free memory */
   init_freemem();
 
+  printf("[runtime] FreeMem: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
+
   /* load eapp elf */
   printf("[runtime] Start loading Eapp elf.\n");
-  assert(!verify_and_load_elf_file(__va(user_paddr), free_paddr-user_paddr, true));
+
+  assert(!verify_and_load_elf_file(__va(user_paddr), eapp_elf_size, true));
+  
   printf("[runtime] Stopped loading Eapp elf.\n");
   
-  //print_page_table_recursive(root_page_table, 2, 0);
+  print_page_table_recursive(root_page_table, 2, 0);
   
   /* free leaking memory */
   // TODO: clean up after loader -- entire file no longer needed
@@ -132,7 +160,6 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   
   #ifdef USE_PAGING
-  printf("Backing storage used for paging\n");
   init_paging(user_paddr, free_paddr);
   #endif /* USE_PAGING */
 
@@ -148,7 +175,7 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   /* Enable the FPU */
   csr_write(sstatus, csr_read(sstatus) | 0x6000);
 
-  print_page_table_recursive(root_page_table, 2, 0);
+  //print_page_table_recursive(root_page_table, 2, 0);
 
   warn("boot finished. drop to the user land ...");
   /* booting all finished, droping to the user land */

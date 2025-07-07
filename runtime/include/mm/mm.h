@@ -9,7 +9,11 @@ uintptr_t translate(uintptr_t va);
 pte* pte_of_va(uintptr_t va);
 void print_page_table_recursive(pte* table, int level, uintptr_t vbase);
 uintptr_t map_page(uintptr_t vpn, uintptr_t ppn, int flags);
-uintptr_t alloc_page(uintptr_t vpn, int flags);
+uintptr_t alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels);
+#define alloc_page(vpn, flags)      alloc_page_generic(vpn, flags, 3)
+#ifdef MEGAPAGE_MAPPING
+#define alloc_megapage(vpn, flags)  alloc_page_generic(vpn, flags, 2) 
+#endif
 uintptr_t realloc_page(uintptr_t vpn, int flags);
 void free_page(uintptr_t vpn);
 size_t alloc_pages(uintptr_t vpn, size_t count, int flags);
