@@ -164,6 +164,7 @@ uintptr_t syscall_mmap(void *addr, size_t length, int prot, int flags,
 }
 
 uintptr_t syscall_mprotect(void *addr, size_t len, int prot) {
+  printf("mprotect is called for %zu bytes starting at addr %p and for protection flags %d\n", len, addr, prot);
   int i, ret;
   size_t pages = len / RISCV_PAGE_SIZE;
 

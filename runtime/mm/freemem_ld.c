@@ -6,7 +6,7 @@
 static uintptr_t freeBase;
 static uintptr_t freeEnd;
 
-void spa_init(uintptr_t base, size_t size)
+void spa_init_generic(uintptr_t base, size_t size, unsigned int page_bits)
 {
   freeBase = base;
   freeEnd = freeBase + size;
@@ -29,21 +29,7 @@ uintptr_t spa_get_zero()
   return new_page;
 }
 
-#ifdef MEGAPAGE_MAPPING
-uintptr_t spa_get_zero_megapage()
-{
-  if (freeBase >= freeEnd) {
-    return 0;
-  }
-  uintptr_t new_page = freeBase;
-  memset((void *) new_page, 0, RISCV_MEGAPAGE_SIZE);
-
-  freeBase += RISCV_MEGAPAGE_SIZE;
-  return new_page;
-}
-#endif
-
-void spa_put(uintptr_t page)
+void spa_put(uintptr_t page, bool is_4K_allocator)
 {
   assert(false); // not implemented
 }
@@ -52,3 +38,23 @@ unsigned int spa_available()
 {
   return (freeEnd - freeBase) / RISCV_PAGE_SIZE;
 }
+
+#ifdef MEGAPAGE_MAPPING
+uintptr_t spa_get_megapage(void)
+{
+  assert(false); // not implemented for the loader
+  return 0;
+}
+
+uintptr_t spa_get_zero_megapage(void)
+{
+  assert(false); // not implemented for the loader
+  return 0;
+}
+
+unsigned int spa_megapages_available()
+{
+  assert(false); // not implemented for the loader
+  return 0;
+}
+#endif

@@ -50,6 +50,12 @@ uintptr_t program_break;
 uintptr_t freemem_va_start;
 size_t freemem_size;
 
+#ifdef MEGAPAGE_MAPPING
+uintptr_t free_2m;
+uintptr_t freemem_va_start_2m;
+uintptr_t freemem_size_2m;
+#endif
+
 /* shared buffer */
 uintptr_t shared_buffer;
 uintptr_t shared_buffer_size;

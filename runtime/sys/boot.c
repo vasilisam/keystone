@@ -58,6 +58,9 @@ void
 init_freemem()
 {
   spa_init(freemem_va_start, freemem_size);
+  #ifdef MEGAPAGE_MAPPING
+  spa_init_megapage(freemem_va_start_2m, freemem_size_2m);
+  #endif
 }
 
 /* initialize user stack */
@@ -69,14 +72,16 @@ init_user_stack_and_env(ELF(Ehdr) *hdr)
   uintptr_t stack_end = EYRIE_USER_STACK_END;
   size_t stack_count = EYRIE_USER_STACK_SIZE >> RISCV_PAGE_BITS;
 
-  printf("Eapp's stack %zu pages allocation\n", stack_count);
+  printf("[runtime] Stack end 0x%p → VPN[2] = 0x%lx, VPN[1] = 0x%lx, VPN[0] = 0x%lx\n",
+               stack_end, RISCV_GET_PT_INDEX(stack_end, 1), RISCV_GET_PT_INDEX(stack_end, 2), RISCV_GET_PT_INDEX(stack_end, 3));
+  printf("[runtime] Eapp's stack %zu pages allocation\n", stack_count);
   // allocated stack pages right below the runtime
   count = alloc_pages(vpn(stack_end), stack_count,
       PTE_R | PTE_W | PTE_D | PTE_A | PTE_U);
 
   assert(count == stack_count);
 
-  printf("Eapp's stack allocation finished.\n");
+  printf("[runtime] Eapp's stack allocation finished.\n");
   // setup user stack env/aux
   user_sp = setup_start(user_sp, hdr);
 
@@ -99,6 +104,7 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   #else 
     printf("[runtime] 4KiB pages used for loading and executing the Eapp.\n");
   #endif
+
   /* set initial values */
   load_pa_start = dram_base;
   root_page_table = (pte*) __va(csr_read(satp) << RISCV_PAGE_BITS);
@@ -107,8 +113,7 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   runtime_va_start = (uintptr_t) &rt_base;
   kernel_offset = runtime_va_start - runtime_paddr;
 
-  printf("[runtime] root_page_table: 0x%lx-0x%lx\n", root_page_table, root_page_table + RISCV_PAGE_SIZE);
-  printf("%d\n", RISCV_PAGE_SIZE);
+  printf("[runtime] root_page_table: 0x%lx-0x%lx\n", (uintptr_t) root_page_table, (uintptr_t) root_page_table + RISCV_PAGE_SIZE);
   printf("[runtime] UTM : 0x%lx-0x%lx (%u KB)\n", utm_vaddr, utm_vaddr+utm_size, utm_size/1024);
   printf("[runtime] DRAM: 0x%lx-0x%lx (%u KB)\n", dram_base, dram_base + dram_size, dram_size/1024);
   printf("[runtime] RT  : 0x%lx-0x%lx (%u KB)\n", runtime_paddr, user_paddr, (user_paddr-runtime_paddr)/1024);
@@ -125,21 +130,28 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   printf("Initialize Free Memory\n");
   
-  // align Freemem to the next 2MiB-aligned address. That would be the 
-  // starting address of Eapp Elf to be loaded. Substract 4KB for the 
-  // leaf page table to be allocated
+  /* To minimize free memory waste when allocating 2 MiB megapages (for code, heap, stack) 
+     but still needing 4 KiB pages (for page tables or small allocations), we can use a dual 
+     allocator strategy with 4KiB and 2 MiB alignment for Free Memory. Thus, we align Free 
+     Memory to the next 2MiB-aligned address. The remaining pages between the later and 
+     Free Memory base before the alignement shall be used as page tables for the Eapp's 
+     code, stack and heap. For that purpose we need at least 3 pages that will function 
+     as leaf page tables for these 3 segments of an Eapp and then for every 1GiB of heap 
+     allocation we need another leaf page table. For now, we reserve at least 16 pages. */
   
   #ifdef MEGAPAGE_MAPPING
-  free_paddr = MEGAPAGE_UP(free_paddr);
-  free_paddr -= RISCV_PAGE_SIZE;
-  freemem_va_start = __va(free_paddr);
-  freemem_size = dram_base + dram_size - free_paddr;
+  free_2m = MEGAPAGE_UP(free_paddr);          // for 2MiB-aligned pages
+  if ((freemem_size >> RISCV_PAGE_BITS) < 16) // we need at least 16 free 4KiB pages
+    free_2m += RISCV_MEGAPAGE_SIZE;
+  freemem_va_start_2m = __va(free_2m);
+  freemem_size = free_2m - free_paddr;
+  freemem_size_2m = dram_base + dram_size - free_2m;
+  message("[runtime] 4KB-SPA: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, free_paddr + freemem_size, freemem_size/1024, freemem_va_start);
+  message("[runtime] 2MB-SPA: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_2m, dram_base + dram_size, freemem_size_2m/1024, freemem_va_start_2m);
   #endif
 
   /* initialize free memory */
   init_freemem();
-
-  printf("[runtime] FreeMem: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
 
   /* load eapp elf */
   printf("[runtime] Start loading Eapp elf.\n");
@@ -147,8 +159,6 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   assert(!verify_and_load_elf_file(__va(user_paddr), eapp_elf_size, true));
   
   printf("[runtime] Stopped loading Eapp elf.\n");
-  
-  print_page_table_recursive(root_page_table, 2, 0);
   
   /* free leaking memory */
   // TODO: clean up after loader -- entire file no longer needed
@@ -165,6 +175,8 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   /* initialize user stack */
   init_user_stack_and_env((ELF(Ehdr) *) __va(user_paddr));
+
+  print_page_table_recursive(root_page_table, 2, 0);
 
   /* prepare edge & system calls */
   init_edge_internals();

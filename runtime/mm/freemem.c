@@ -16,20 +16,33 @@
  * SPA can allocate/free a page in constant time. */
 
 static struct pg_list spa_free_pages;
+#ifdef MEGAPAGE_MAPPING
+static struct pg_list spa_free_megapages;
+#endif 
 
 /* get a free page from the simple page allocator */
 uintptr_t
-__spa_get(bool zero)
+__spa_get(bool zero, bool is_megapage)
 {
   uintptr_t free_page;
+  struct pg_list* list;
 
-  if (LIST_EMPTY(spa_free_pages)) {
+#ifdef MEGAPAGE_MAPPING
+  if (is_megapage) {
+    list = &spa_free_megapages;
+  } else
+#endif
+  {
+    list = &spa_free_pages;
+  }
+
+  if (LIST_EMPTY(*list)) {
     /* try evict a page */
 #ifdef USE_PAGING
     uintptr_t new_pa = paging_evict_and_free_one(0);
     if(new_pa)
     {
-      spa_put(__va(new_pa));
+      spa_put(__va(new_pa), 1);
     }
     else
 #endif
@@ -39,63 +52,85 @@ __spa_get(bool zero)
     }
   }
 
-  free_page = spa_free_pages.head;
+  free_page = list->head;
   assert(free_page);
 
   /* update list head */
-  uintptr_t next = NEXT_PAGE(spa_free_pages.head);
-  spa_free_pages.head = next;
-  spa_free_pages.count--;
+  uintptr_t next = NEXT_PAGE(list->head);
+  list->head = next;
+  list->count--;
 
-  assert(free_page > EYRIE_LOAD_START && free_page < (freemem_va_start + freemem_size));
-
-  if (zero)
-    memset((void*)free_page, 0, RISCV_PAGE_SIZE);
+#ifdef MEGAPAGE_MAPPING
+  if (is_megapage) {
+    assert(free_page > EYRIE_LOAD_START && free_page < (freemem_va_start_2m  + freemem_size_2m));
+    if (zero)
+      memset((void*)free_page, 0, RISCV_MEGAPAGE_SIZE);
+  } else
+#endif
+  {
+    assert(free_page > EYRIE_LOAD_START && free_page < (freemem_va_start + freemem_size));
+    if (zero)
+      memset((void*)free_page, 0, RISCV_PAGE_SIZE);
+  }
 
   return free_page;
 }
 
-uintptr_t spa_get() { return __spa_get(false); }
+uintptr_t spa_get() { return __spa_get(false, 0); }
 
 uintptr_t spa_get_zero() { 
-  return __spa_get(true); 
+  return __spa_get(true, 0); 
 }
 
 #ifdef MEGAPAGE_MAPPING
-uintptr_t spa_get_zero_megapage() {
-  uintptr_t megapage_start;
-  uintptr_t new_page;
+uintptr_t spa_get_megapage() { return __spa_get(false, 1); }
 
-  for(int i = 0; i < 512; i++) {
-    new_page = spa_get_zero();
-    if (i == 0)
-      megapage_start = new_page;
-  }
-  return megapage_start;
+uintptr_t spa_get_zero_megapage() {
+ return  __spa_get(true, 1);
+}
+
+unsigned int
+spa_megapages_available(){
+#ifndef USE_PAGING
+  return spa_free_megapages.count;
+#else
+  return spa_free_megapages.count + paging_remaining_pages();
+#endif
 }
 #endif
 
 /* put a page to the simple page allocator */
 void
-spa_put(uintptr_t page_addr)
+spa_put(uintptr_t page_addr, bool is_4K_allocator)
 {
   uintptr_t prev;
+  struct pg_list* list;
 
-  assert(IS_ALIGNED(page_addr, RISCV_PAGE_BITS));
-  assert(page_addr >= EYRIE_LOAD_START && page_addr < (freemem_va_start  + freemem_size));
+#ifdef MEGAPAGE_MAPPING
+  if (!is_4K_allocator) {
+    assert(IS_ALIGNED(page_addr, RISCV_MEGAPAGE_BITS));
+    assert(page_addr >= EYRIE_LOAD_START && page_addr < (freemem_va_start_2m  + freemem_size_2m));
+    list = &spa_free_megapages;
+  } else
+#endif
+  {
+    assert(IS_ALIGNED(page_addr, RISCV_PAGE_BITS));
+    assert(page_addr >= EYRIE_LOAD_START && page_addr < (freemem_va_start  + freemem_size));
+    list = &spa_free_pages;
+  }
 
-  if (!LIST_EMPTY(spa_free_pages)) {
-    prev = spa_free_pages.tail;
+  if (!LIST_EMPTY(*list)) {
+    prev = list->tail;
     assert(prev);
     NEXT_PAGE(prev) = page_addr;
   } else {
-    spa_free_pages.head = page_addr;
+    list->head = page_addr;
   }
 
   NEXT_PAGE(page_addr) = 0;
-  spa_free_pages.tail = page_addr;
+  list->tail = page_addr;
 
-  spa_free_pages.count++;
+  list->count++;
   return;
 }
 
@@ -109,20 +144,31 @@ spa_available(){
 }
 
 void
-spa_init(uintptr_t base, size_t size)
+spa_init_generic(uintptr_t base, size_t size, unsigned int page_bits)
 {
   uintptr_t cur;
+  bool is_4K_allocator = true;
 
-  LIST_INIT(spa_free_pages);
+#ifdef MEGAPAGE_MAPPING
+  if (page_bits == RISCV_MEGAPAGE_BITS) {
+    LIST_INIT(spa_free_megapages);
+    is_4K_allocator = false;
+  } else
+#endif
+  {
+    LIST_INIT(spa_free_pages);
+  }
 
   // both base and size must be page-aligned
-  assert(IS_ALIGNED(base, RISCV_PAGE_BITS));
+  assert(IS_ALIGNED(base, page_bits));
+
+  //TODO Free Memory size isn't always 2MiB-aligned
   assert(IS_ALIGNED(size, RISCV_PAGE_BITS));
 
   /* put all free pages in freemem (base) into spa_free_pages */
   for(cur = base;
       cur < base + size;
-      cur += RISCV_PAGE_SIZE) {
-    spa_put(cur);
+      cur += BIT(page_bits)) {
+      spa_put(cur, is_4K_allocator);
   }
 }

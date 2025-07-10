@@ -54,7 +54,7 @@ __continue_walk_create(pte* root, uintptr_t addr, pte* pte, int page_table_level
   unsigned long free_ppn = ppn(__pa(new_page));
   *pte = ptd_create(free_ppn);
 
-  printf("PTE is 0x%p in address 0x%p\n", *pte, pte);
+  printf("New PTE: 0x%p at 0x%p\n", *pte, pte);
   printf("4KB-Page allocated from FreeMem at 0x%llx\n", free_ppn << RISCV_PAGE_BITS);
   return __walk_create(root, addr, page_table_levels);
 }
@@ -141,6 +141,12 @@ alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels)
   assert(page);
 
   *pte = pte_create(ppn(__pa(page)), PTE_D | PTE_A | PTE_V | flags);
+
+#ifdef MEGAPAGE_MAPPING 
+  if (page_table_levels == 2)
+    printf("New PTE: 0x%p at 0x%p\n", *pte, pte);
+#endif
+
 #ifdef USE_PAGING
   paging_inc_user_page();
 #endif
@@ -186,7 +192,7 @@ free_page(uintptr_t vpn)
   paging_dec_user_page();
 #endif
   // Return phys page
-  spa_put(__va(ppn << RISCV_PAGE_BITS));
+  spa_put(__va(ppn << RISCV_PAGE_BITS), 1);
 
   return;
 
