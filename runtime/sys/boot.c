@@ -70,18 +70,20 @@ init_user_stack_and_env(ELF(Ehdr) *hdr)
   void* user_sp = (void*) EYRIE_USER_STACK_START;
   size_t count;
   uintptr_t stack_end = EYRIE_USER_STACK_END;
+  #ifdef MEGAPAGE_MAPPING
+  size_t stack_count = EYRIE_USER_STACK_SIZE >> RISCV_MEGAPAGE_BITS;
+  #else
   size_t stack_count = EYRIE_USER_STACK_SIZE >> RISCV_PAGE_BITS;
+  #endif
 
-  printf("[runtime] Stack end 0x%p → VPN[2] = 0x%lx, VPN[1] = 0x%lx, VPN[0] = 0x%lx\n",
-               stack_end, RISCV_GET_PT_INDEX(stack_end, 1), RISCV_GET_PT_INDEX(stack_end, 2), RISCV_GET_PT_INDEX(stack_end, 3));
-  printf("[runtime] Eapp's stack %zu pages allocation\n", stack_count);
+  message("[runtime] Stack allocation begins (%zu pages).\n", stack_count);
   // allocated stack pages right below the runtime
   count = alloc_pages(vpn(stack_end), stack_count,
-      PTE_R | PTE_W | PTE_D | PTE_A | PTE_U);
+      PTE_R | PTE_W | PTE_D | PTE_A | PTE_U, 1);
 
   assert(count == stack_count);
 
-  printf("[runtime] Eapp's stack allocation finished.\n");
+  message("[runtime] Stack allocation ends.\n");
   // setup user stack env/aux
   user_sp = setup_start(user_sp, hdr);
 
@@ -100,9 +102,9 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
            uintptr_t utm_size)
 {
   #ifdef MEGAPAGE_MAPPING
-    printf("[runtime] 2MiB megapages used for loading and executing the Eapp.\n");
+    message("[runtime] 2MiB megapages used for loading and executing the Eapp.\n");
   #else 
-    printf("[runtime] 4KiB pages used for loading and executing the Eapp.\n");
+    message("[runtime] 4KiB pages used for loading and executing the Eapp.\n");
   #endif
 
   /* set initial values */
@@ -113,22 +115,22 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   runtime_va_start = (uintptr_t) &rt_base;
   kernel_offset = runtime_va_start - runtime_paddr;
 
-  printf("[runtime] root_page_table: 0x%lx-0x%lx\n", (uintptr_t) root_page_table, (uintptr_t) root_page_table + RISCV_PAGE_SIZE);
-  printf("[runtime] UTM : 0x%lx-0x%lx (%u KB)\n", utm_vaddr, utm_vaddr+utm_size, utm_size/1024);
-  printf("[runtime] DRAM: 0x%lx-0x%lx (%u KB)\n", dram_base, dram_base + dram_size, dram_size/1024);
-  printf("[runtime] RT  : 0x%lx-0x%lx (%u KB)\n", runtime_paddr, user_paddr, (user_paddr-runtime_paddr)/1024);
-  printf("[runtime] Eapp: 0x%lx-0x%lx (%u KB)\n", user_paddr, free_paddr, (free_paddr-user_paddr)/1024);
+  message("[runtime] root_page_table: 0x%p-0x%p\n", (uintptr_t) root_page_table, (uintptr_t) root_page_table + RISCV_PAGE_SIZE);
+  message("[runtime] UTM : 0x%p-0x%p (%u KB)\n", utm_vaddr, utm_vaddr+utm_size, utm_size/1024);
+  message("[runtime] DRAM: 0x%p-0x%p (%u KB)\n", dram_base, dram_base + dram_size, dram_size/1024);
+  message("[runtime] RT  : 0x%p-0x%p (%u KB)\n", runtime_paddr, user_paddr, (user_paddr-runtime_paddr)/1024);
+  message("[runtime] Eapp: 0x%p-0x%p (%u KB)\n", user_paddr, free_paddr, (free_paddr-user_paddr)/1024);
 
   /* set trap vector */
   csr_write(stvec, &encl_trap_handler);
   freemem_va_start = __va(free_paddr);
   freemem_size = dram_base + dram_size - free_paddr;
 
-  printf("[runtime] FreeMem: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
+  message("[runtime] FreeMem: 0x%p-0x%p (%u KB), va 0x%p\n", free_paddr, dram_base + dram_size, freemem_size/1024, freemem_va_start);
 
   eapp_elf_size = free_paddr - user_paddr;
 
-  printf("Initialize Free Memory\n");
+  message("[runtime] Initialize Free Memory\n");
   
   /* To minimize free memory waste when allocating 2 MiB megapages (for code, heap, stack) 
      but still needing 4 KiB pages (for page tables or small allocations), we can use a dual 
@@ -146,27 +148,29 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   freemem_va_start_2m = __va(free_2m);
   freemem_size = free_2m - free_paddr;
   freemem_size_2m = dram_base + dram_size - free_2m;
-  message("[runtime] 4KB-SPA: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_paddr, free_paddr + freemem_size, freemem_size/1024, freemem_va_start);
-  message("[runtime] 2MB-SPA: 0x%lx-0x%lx (%u KB), va 0x%lx\n", free_2m, dram_base + dram_size, freemem_size_2m/1024, freemem_va_start_2m);
+  message("[runtime] 4KB-SPA: 0x%p-0x%p (%u KB), va 0x%p\n", free_paddr, free_paddr + freemem_size, freemem_size/1024, freemem_va_start);
+  message("[runtime] 2MB-SPA: 0x%p-0x%p (%u KB), va 0x%p\n", free_2m, dram_base + dram_size, freemem_size_2m/1024, freemem_va_start_2m);
   #endif
 
   /* initialize free memory */
   init_freemem();
 
   /* load eapp elf */
-  printf("[runtime] Start loading Eapp elf.\n");
+  message("[runtime] Eapp elf loading begins.\n");
 
   assert(!verify_and_load_elf_file(__va(user_paddr), eapp_elf_size, true));
   
-  printf("[runtime] Stopped loading Eapp elf.\n");
+  message("[runtime] Eapp elf loading ends.\n");
   
   /* free leaking memory */
   // TODO: clean up after loader -- entire file no longer needed
   // TODO: load elf file doesn't map some pages; those can be re-used. runtime and eapp.
 
-  //TODO: This should be set by walking the userspace vm and finding
-  //highest used addr. Instead we start partway through the anon space
-  set_program_break(EYRIE_ANON_REGION_START + (1024 * 1024 * 1024));
+  // For setting properly the program break,
+  // walk the userspace vm and find highest used addr.
+  uintptr_t user_va_max = find_highest_user_va();
+  set_program_break(user_va_max);
+  message("Program break = %p\n", user_va_max);
 
   
   #ifdef USE_PAGING
@@ -176,7 +180,7 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
   /* initialize user stack */
   init_user_stack_and_env((ELF(Ehdr) *) __va(user_paddr));
 
-  print_page_table_recursive(root_page_table, 2, 0);
+  print_page_table(root_page_table, 1, 0);
 
   /* prepare edge & system calls */
   init_edge_internals();
@@ -189,7 +193,7 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   //print_page_table_recursive(root_page_table, 2, 0);
 
-  warn("boot finished. drop to the user land ...");
+  message("[runtime] boot finished. drop to the user land ...\n");
   /* booting all finished, droping to the user land */
   return;
 }

@@ -2,12 +2,15 @@
 #define _MM_H_
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "mm/vm_defs.h"
 
 uintptr_t translate(uintptr_t va);
 pte* pte_of_va(uintptr_t va);
-void print_page_table_recursive(pte* table, int level, uintptr_t vbase);
+void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, uintptr_t* va_max);
+#define print_page_table(table, level, vbase)  page_table_walker(table, level, vbase, true, NULL)
+uintptr_t find_highest_user_va();
 uintptr_t map_page(uintptr_t vpn, uintptr_t ppn, int flags);
 uintptr_t alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels);
 #define alloc_page(vpn, flags)      alloc_page_generic(vpn, flags, 3)
@@ -16,7 +19,7 @@ uintptr_t alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels);
 #endif
 uintptr_t realloc_page(uintptr_t vpn, int flags);
 void free_page(uintptr_t vpn);
-size_t alloc_pages(uintptr_t vpn, size_t count, int flags);
+size_t alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage);
 void free_pages(uintptr_t vpn, size_t count);
 size_t test_va_range(uintptr_t vpn, size_t count);
 

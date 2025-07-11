@@ -11,28 +11,46 @@ __walk_create(pte* root, uintptr_t addr, int page_table_levels);
 /* Hacky storage of current u-mode break */
 static uintptr_t current_program_break;
 
-void print_page_table_recursive(pte* table, int level, uintptr_t vbase) {
+/* This is a function that walks the page table hierarchy, 
+   prints PTEs if print_pt == true and also stores the 
+   highest virtual memory address used in max_va pointer */
+void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, uintptr_t *va_max) {
   for (int i = 0; i < 512; i++) {
-    if ((table[i] & PTE_V)) {//} && (table[i] & PTE_U)) {
-      uintptr_t vpn = vbase | ((uintptr_t)i << (RISCV_PAGE_BITS + RISCV_PT_INDEX_BITS * level));
-      //printf("L%d: VPN 0x%lx -> PTE 0x%lx ", level, vpn >> RISCV_PAGE_BITS, table[i]);
+    if (!(table[i] & PTE_V)) continue;
+    
+    uintptr_t vpn = vbase | (uintptr_t)i << RISCV_GET_LVL_PGSIZE_BITS(level);
 
-      if (table[i] & (PTE_R | PTE_W | PTE_X)) {  // if it's a leaf (RWX present) in U-space
-        if (!(table[i] & PTE_U))
-          continue;   // skip kernel leaf mappings
-        uintptr_t ppn = pte_ppn(table[i]);
-        printf("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
-        printf("-> PA 0x%lx\n", ppn << RISCV_PAGE_BITS);
-      } else {
-        //if it's an intermediate page table
-        uintptr_t next_table_pa = pte_ppn(table[i]) << RISCV_PAGE_BITS;
-        pte* next_table = (pte*)__va(next_table_pa);
-        printf("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
-        printf("-> Next table @ PA 0x%lx (VA %p)\n", next_table_pa, next_table);
-        print_page_table_recursive(next_table, level - 1, vpn);
+    if (table[i] & (PTE_R | PTE_W | PTE_X)) {  
+      // skip kernel leaf pages
+      if (!(table[i] & PTE_U)) continue;
+    
+      if (va_max) {
+        uintptr_t va_end = vpn + RISCV_GET_LVL_PGSIZE(level); // move past the last used page
+        if (va_end > *va_max)
+          *va_max = va_end;
       }
+      if (print_pt) {
+        uintptr_t ppn = pte_ppn(table[i]);
+        message("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
+        message("-> PA 0x%lx\n", ppn << RISCV_PAGE_BITS);
+      }
+    } else {
+      //if it's an intermediate page table
+      uintptr_t next_table_pa = pte_ppn(table[i]) << RISCV_PAGE_BITS;
+      pte* next_table = (pte*)__va(next_table_pa);
+      if (print_pt) {
+        message("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
+        message("-> Next table @ PA 0x%lx (VA %p)\n", next_table_pa, next_table);
+      }
+      page_table_walker(next_table, level + 1, vpn, print_pt, va_max);
     }
   }
+}
+
+uintptr_t find_highest_user_va() {
+  uintptr_t va_max = 0;
+  page_table_walker(root_page_table, 1, 0, false, &va_max);
+  return va_max;
 }
 
 uintptr_t get_program_break()
@@ -54,8 +72,8 @@ __continue_walk_create(pte* root, uintptr_t addr, pte* pte, int page_table_level
   unsigned long free_ppn = ppn(__pa(new_page));
   *pte = ptd_create(free_ppn);
 
-  printf("New PTE: 0x%p at 0x%p\n", *pte, pte);
-  printf("4KB-Page allocated from FreeMem at 0x%llx\n", free_ppn << RISCV_PAGE_BITS);
+  message("[runtime] New PTE: 0x%lx at 0x%p\n", *pte, pte);
+  message("[runtime] 4KB-Page allocated from FreeMem at 0x%p\n", free_ppn << RISCV_PAGE_BITS);
   return __walk_create(root, addr, page_table_levels);
 }
 
@@ -69,13 +87,13 @@ __walk_internal(pte* root, uintptr_t addr, int create, int page_table_levels)
     size_t idx = RISCV_GET_PT_INDEX(addr, i);
 
     if (page_table_levels == 2)
-      printf("Page Level: %d page table t = %p at index %zu\n", i, t, idx);
+      message("[runtime] Page Level: %d page table t = %p at index %zu\n", i, t, idx);
     if (!(t[idx] & PTE_V))
       return create ? __continue_walk_create(root, addr, &t[idx], page_table_levels) : 0;
 
     t = (pte*) __va(pte_ppn(t[idx]) << RISCV_PAGE_BITS);
     if (page_table_levels == 2)
-      printf("page table points to 0x%p\n", t);
+      message("[runtime] page table points to 0x%p\n", t);
   }
 
   return &t[RISCV_GET_PT_INDEX(addr, page_table_levels)];
@@ -144,7 +162,7 @@ alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels)
 
 #ifdef MEGAPAGE_MAPPING 
   if (page_table_levels == 2)
-    printf("New PTE: 0x%p at 0x%p\n", *pte, pte);
+    message("[runtime] New PTE: 0x%lx at 0x%p\n", *pte, pte);
 #endif
 
 #ifdef USE_PAGING
@@ -201,12 +219,20 @@ free_page(uintptr_t vpn)
 /* allocate n new pages from a given vpn
  * returns the number of pages allocated */
 size_t
-alloc_pages(uintptr_t vpn, size_t count, int flags)
+alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage)
 {
   unsigned int i;
   for (i = 0; i < count; i++) {
-    if(!alloc_page(vpn + i, flags))
-      break;
+    #ifdef MEGAPAGE_MAPPING
+      if(is_megapage){
+        if(!alloc_megapage(vpn + i, flags))
+        break;
+      } else
+    #endif
+      {
+        if(!alloc_page(vpn + i, flags))
+        break;
+      }
   }
 
   return i;
@@ -340,7 +366,7 @@ __map_with_reserved_page_table_64(uintptr_t dram_base,
       pte_create(ppn(dram_base + offset),
           PTE_R | PTE_W | PTE_X | PTE_A | PTE_D);
 
-    printf("[map EPM] VA: 0x%llx -> PA: 0x%llx\n", ptr + offset, dram_base + offset);
+    message("[map EPM] VA: 0x%p -> PA: 0x%p\n", ptr + offset, dram_base + offset);
   }
 
 }
@@ -354,10 +380,8 @@ map_with_reserved_page_table(uintptr_t dram_base,
 {
   #if __riscv_xlen == 64
   if (dram_size > RISCV_GET_LVL_PGSIZE(2)) {
-    warn("DRAM SIZE > 2MiB");
     __map_with_reserved_page_table_64(dram_base, dram_size, ptr, l2_pt, 0);
   } else {
-    warn("DRAM SIZE < 2MiB");
     __map_with_reserved_page_table_64(dram_base, dram_size, ptr, l2_pt, l3_pt);
   }
     #elif __riscv_xlen == 32
