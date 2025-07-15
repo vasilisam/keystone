@@ -14,3 +14,4 @@ if(NET_SYSCALL)
 endif()
 
 add_library(rt_call STATIC ${CALL_SOURCES})
+target_compile_definitions(rt_call PUBLIC MEGAPAGE_MAPPING)

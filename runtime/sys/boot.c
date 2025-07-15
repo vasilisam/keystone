@@ -168,11 +168,10 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   // For setting properly the program break,
   // walk the userspace vm and find highest used addr.
-  uintptr_t user_va_max = find_highest_user_va();
+  uintptr_t user_va_max = find_max_user_va();
   set_program_break(user_va_max);
-  message("Program break = %p\n", user_va_max);
+  message("[runtime] Program break = %p\n", user_va_max);
 
-  
   #ifdef USE_PAGING
   init_paging(user_paddr, free_paddr);
   #endif /* USE_PAGING */
@@ -190,8 +189,6 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   /* Enable the FPU */
   csr_write(sstatus, csr_read(sstatus) | 0x6000);
-
-  //print_page_table_recursive(root_page_table, 2, 0);
 
   message("[runtime] boot finished. drop to the user land ...\n");
   /* booting all finished, droping to the user land */

@@ -23,14 +23,15 @@ void map_physical_memory(uintptr_t dram_base, uintptr_t dram_size) {
   uintptr_t ptr = EYRIE_LOAD_START;
   /* load address should not override kernel address */
   assert(RISCV_GET_PT_INDEX(ptr, 1) != RISCV_GET_PT_INDEX(RUNTIME_VA_START, 1));
-  printf("[loader] Start mapping EPM physical memory.\n");
+  message("[loader] EPM mapping begins.\n");
   map_with_reserved_page_table(dram_base, dram_size,
       ptr, load_l2_page_table_storage, load_l3_page_table_storage);
+  message("[loader] EPM mapping ends.\n");
 }
 
 int map_untrusted_memory(uintptr_t untrusted_ptr, uintptr_t untrusted_size) {
   uintptr_t va        = EYRIE_UNTRUSTED_START;
-  printf("[loader] Start mapping UTM physical memory.\n");
+  message("[loader] UTM mapping begins.\n");
   while (va < EYRIE_UNTRUSTED_START + untrusted_size) {
     if (!map_page(vpn(va), ppn(untrusted_ptr), PTE_W | PTE_R | PTE_D)) {
       return -1;
@@ -38,6 +39,7 @@ int map_untrusted_memory(uintptr_t untrusted_ptr, uintptr_t untrusted_size) {
     va += RISCV_PAGE_SIZE;
     untrusted_ptr += RISCV_PAGE_SIZE;
   }
+  message("[loader] UTM mapping ends.\n");
   return 0;
 }
 
@@ -50,9 +52,9 @@ int load_runtime(uintptr_t dummy,
 
   root_page_table = root_page_table_storage;
 
-  printf("[loader] root_page_table: 0x%lx-0x%lx\n", (uintptr_t) root_page_table_storage, (uintptr_t) root_page_table_storage + RISCV_PAGE_SIZE);
-  printf("[loader] l2_page_table  : 0x%lx-0x%lx\n", (uintptr_t) load_l2_page_table_storage, (uintptr_t) load_l2_page_table_storage + RISCV_PAGE_SIZE);
-  printf("[loader] l3_page_table  : 0x%lx-0x%lx\n", (uintptr_t) load_l3_page_table_storage, (uintptr_t) load_l3_page_table_storage + RISCV_PAGE_SIZE);
+  message("[loader] root_page_table: 0x%p-0x%p\n", (uintptr_t) root_page_table_storage, (uintptr_t) root_page_table_storage + RISCV_PAGE_SIZE);
+  message("[loader] l2_page_table  : 0x%p-0x%p\n", (uintptr_t) load_l2_page_table_storage, (uintptr_t) load_l2_page_table_storage + RISCV_PAGE_SIZE);
+  message("[loader] l3_page_table  : 0x%p-0x%p\n", (uintptr_t) load_l3_page_table_storage, (uintptr_t) load_l3_page_table_storage + RISCV_PAGE_SIZE);
  
   // initialize freemem
   spa_init(free_base, dram_base + dram_size - free_base);
@@ -71,10 +73,9 @@ int load_runtime(uintptr_t dummy,
     return ret;
   }
   
-  printf("[loader] Before loading RT elf (%zu B)\n", runtime_size);
-  printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
+  message("[loader] Runtime elf loading starts (%zu B)\n", runtime_size);
+  message("[loader] FreeMem: 0x%p\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
   
-
   // map runtime memory
   ret = loadElf(&runtime_elf, 0);
   if (ret != 0) {
@@ -82,14 +83,13 @@ int load_runtime(uintptr_t dummy,
   }
 
   
-  printf("[loader] After loading RT elf ....\n");
-  printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
+  message("[loader] Runtime elf loading ends.\n");
+  message("[loader] FreeMem: 0x%p\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
   
   // map enclave physical memory, so that runtime will be able to access all memory
   map_physical_memory(dram_base, dram_size);
 
-  printf("After mapping EPM....\n");
-  printf("[loader] FreeMem: 0x%llx\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
+  message("[loader] FreeMem: 0x%p\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
   // map untrusted memory
   ret = map_untrusted_memory(untrusted_ptr, untrusted_size);
   if (ret != 0) {
@@ -97,13 +97,12 @@ int load_runtime(uintptr_t dummy,
   }
 
   free_base_final = dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE;
-  printf("After mapping Untrusted Memory....\n");
-  printf("[loader] FreeMem: 0x%lx-0x%lx\n", (uintptr_t) free_base_final, (uintptr_t) dram_base + dram_size);
+  message("[loader] FreeMem: 0x%p-0x%p\n", (uintptr_t) free_base_final, (uintptr_t) dram_base + dram_size);
   return ret;
 }
 
 void error_and_exit() {
-  printf("[loader] FATAL: failed to load.\n");
+  message("[loader] FATAL: failed to load.\n");
   sbi_exit_enclave(-1);
 }
 

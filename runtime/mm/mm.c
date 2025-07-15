@@ -31,7 +31,7 @@ void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, ui
       }
       if (print_pt) {
         uintptr_t ppn = pte_ppn(table[i]);
-        message("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
+        message("L%d: VPN = 0x%03x -> PTE 0x%lx ", level, i, table[i]);
         message("-> PA 0x%lx\n", ppn << RISCV_PAGE_BITS);
       }
     } else {
@@ -39,7 +39,7 @@ void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, ui
       uintptr_t next_table_pa = pte_ppn(table[i]) << RISCV_PAGE_BITS;
       pte* next_table = (pte*)__va(next_table_pa);
       if (print_pt) {
-        message("L%d: VPN = 0x%03lx -> PTE 0x%lx ", level, RISCV_GET_PT_INDEX(vpn, RISCV_PT_LEVELS - level), table[i]);
+        message("L%d: VPN = 0x%03x -> PTE 0x%lx ", level, i, table[i]);
         message("-> Next table @ PA 0x%lx (VA %p)\n", next_table_pa, next_table);
       }
       page_table_walker(next_table, level + 1, vpn, print_pt, va_max);
@@ -47,7 +47,7 @@ void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, ui
   }
 }
 
-uintptr_t find_highest_user_va() {
+uintptr_t find_max_user_va() {
   uintptr_t va_max = 0;
   page_table_walker(root_page_table, 1, 0, false, &va_max);
   return va_max;

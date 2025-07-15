@@ -44,5 +44,5 @@
 #define USE_MESSAGE 1
 #ifdef USE_MESSAGE
 #define message(format, ...) \
-  printf ("" format " (%s:%d)\r\n", ## __VA_ARGS__, __FILE__, __LINE__)
+  printf (format, ## __VA_ARGS__)
 #endif

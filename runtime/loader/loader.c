@@ -90,11 +90,9 @@ int loadElf_megapage(elf_t* elf, bool user) {
         printf("loadElf: va and src are misaligned\n");
         return -1;
       }
-      printf("VA: 0x%p VPN: 0x%lx and SRC: 0x%p\n",va, RISCV_GET_PT_INDEX(va, 2), (void*) src);
       uintptr_t new_page = alloc_megapage(vpn(va), pt_mode);
       if (!new_page)
         return -1;
-      printf("[alloc_megapage 1]: VA 0x%p → PA 0x%p\n", va, __pa(new_page));
       /* .bss segment should always remain zeroed-out */
       /* If the remaining space in this 2 MiB page is more than what’s 
          left in the segment, you copy just up to file_end - va.*/
@@ -102,34 +100,27 @@ int loadElf_megapage(elf_t* elf, bool user) {
                            ? (RISCV_MEGAPAGE_SIZE - RISCV_MEGAPAGE_OFFSET(va)) \
                            : (file_end - va);
       memcpy((void *) (new_page + RISCV_MEGAPAGE_OFFSET(va)), src, bytes_to_copy);
-      printf("%zu data were copied from 0x%p to 0x%p\n", bytes_to_copy, (void*) (new_page + RISCV_MEGAPAGE_OFFSET(va)), (void *) (new_page + RISCV_MEGAPAGE_OFFSET(va) + bytes_to_copy));
       va = MEGAPAGE_DOWN(va) + RISCV_MEGAPAGE_SIZE;
       src = (char *) (MEGAPAGE_DOWN((uintptr_t) src) + RISCV_MEGAPAGE_SIZE);
     }
 
      /* first load all pages that do not include .bss segment */
     while (va + RISCV_MEGAPAGE_SIZE <= file_end) {
-      printf("VA: 0x%p VPN: 0x%lx and SRC: 0x%p\n",va, vpn(va), (void*) src);
       uintptr_t new_page = alloc_megapage(vpn(va), pt_mode);
       if (!new_page)
         return -1;
-      printf("[alloc_megapage 2]: VA 0x%p → PA 0x%p, VPN[2] = 0x%lx, VPN[1] = 0x%lx, VPN[0] = 0x%lx\n",
-               va, __pa(new_page), RISCV_GET_PT_INDEX(va, 1), RISCV_GET_PT_INDEX(va, 2), RISCV_GET_PT_INDEX(va, 3));
       memcpy((void *) new_page, src, RISCV_MEGAPAGE_SIZE);
       src += RISCV_MEGAPAGE_SIZE;
       va += RISCV_MEGAPAGE_SIZE;
     }
 
     while (va < memory_end) {
-      printf("VA: 0x%p VPN: 0x%lx and SRC: 0x%p\n",va, vpn(va), (void*) src);
       uintptr_t new_page = alloc_megapage(vpn(va), pt_mode);
       if (!new_page)
         return -1;
-      printf("[alloc_megapage 3]: VA 0x%p → PA 0x%p\n", va, __pa(new_page));
       /* copy over non .bss part of the page if it's a part of the page */
       if (va < file_end) {
         memcpy((void*) new_page, src, file_end - va);
-        printf("%zu data were copied from 0x%p to 0x%p\n", (size_t) file_end - va, (void*) new_page, (void *) (new_page + file_end - va));
       }
       va += RISCV_MEGAPAGE_SIZE;
     }

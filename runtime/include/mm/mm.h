@@ -10,7 +10,7 @@ uintptr_t translate(uintptr_t va);
 pte* pte_of_va(uintptr_t va);
 void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, uintptr_t* va_max);
 #define print_page_table(table, level, vbase)  page_table_walker(table, level, vbase, true, NULL)
-uintptr_t find_highest_user_va();
+uintptr_t find_max_user_va();
 uintptr_t map_page(uintptr_t vpn, uintptr_t ppn, int flags);
 uintptr_t alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels);
 #define alloc_page(vpn, flags)      alloc_page_generic(vpn, flags, 3)

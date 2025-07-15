@@ -105,6 +105,7 @@ uintptr_t syscall_munmap(void *addr, size_t length){
   free_pages(vpn((uintptr_t)addr), length/RISCV_PAGE_SIZE);
   ret = 0;
   tlb_flush();
+  printf("munmapped is called for %zu pages.\n", length/RISCV_PAGE_SIZE);
   return ret;
 }
 
@@ -146,7 +147,7 @@ uintptr_t syscall_mmap(void *addr, size_t length, int prot, int flags,
     if(req_pages == valid_pages){
       // Set a successful value if we allocate
       // TODO free partial allocation on failure
-      if(alloc_pages(starting_vpn, req_pages, pte_flags) == req_pages){
+      if(alloc_pages(starting_vpn, req_pages, pte_flags, 0) == req_pages){
         ret = starting_vpn << RISCV_PAGE_BITS;
       }
       break;
@@ -164,7 +165,7 @@ uintptr_t syscall_mmap(void *addr, size_t length, int prot, int flags,
 }
 
 uintptr_t syscall_mprotect(void *addr, size_t len, int prot) {
-  printf("mprotect is called for %zu bytes starting at addr %p and for protection flags %d\n", len, addr, prot);
+  print_strace("mprotect is called for %zu bytes starting at addr %p and for protection flags %d\n", len, addr, prot);
   int i, ret;
   size_t pages = len / RISCV_PAGE_SIZE;
 
@@ -195,6 +196,7 @@ uintptr_t syscall_brk(void* addr){
   uintptr_t current_break = get_program_break();
   uintptr_t ret = -1;
   int req_page_count = 0;
+  bool is_megapage = false;
 
   // Return current break if null or current break
   if (req_break == 0) {
@@ -209,9 +211,34 @@ uintptr_t syscall_brk(void* addr){
 
   // Otherwise try to allocate pages
 
+#ifdef MEGAPAGE_MAPPING
+  //Pack smaller allocations into existing megapages until a new one is needed
+  is_megapage = true;
+
+  req_page_count = (MEGAPAGE_UP(req_break) - current_break) / RISCV_MEGAPAGE_SIZE;
+  if (spa_megapages_available() < req_page_count){
+    goto done;
+  }
+
+  //Align current break to a 2MiB-aligned address for correct 2MiB-mapping creation
+  if( alloc_pages(vpn(MEGAPAGE_UP(current_break)),
+                  req_page_count,
+                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_megapage)
+      != req_page_count){
+    goto done;
+  }
+
+  // Keep program break still page-aligned for minimum memory waste.
+  // Page permissions remain the same among brk calls
+  set_program_break(PAGE_UP(req_break));
+  ret = req_break;
+  goto done;
+#endif
+  
+  // Fallback to 4KB mapping
   // Can we allocate enough phys pages?
   req_page_count = (PAGE_UP(req_break) - current_break) / RISCV_PAGE_SIZE;
-  if( spa_available() < req_page_count){
+  if (spa_available() < req_page_count){
     goto done;
   }
 
@@ -219,7 +246,7 @@ uintptr_t syscall_brk(void* addr){
   // TODO free pages on failure
   if( alloc_pages(vpn(current_break),
                   req_page_count,
-                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A)
+                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_megapage)
       != req_page_count){
     goto done;
   }
@@ -231,7 +258,7 @@ uintptr_t syscall_brk(void* addr){
 
  done:
   tlb_flush();
-  printf("[runtime] brk (0x%p) (req pages %i) = 0x%p\r\n",req_break, req_page_count, ret);
+  printf("[runtime] brk (0x%p) (req pages %i) = 0x%p, curr break = 0x%p\r\n",req_break, req_page_count, ret, get_program_break());
   return ret;
 
 }
