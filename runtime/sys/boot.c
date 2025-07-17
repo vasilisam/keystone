@@ -168,7 +168,7 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
 
   // For setting properly the program break,
   // walk the userspace vm and find highest used addr.
-  uintptr_t user_va_max = find_max_user_va();
+  uintptr_t user_va_max = find_max_user_va(root_page_table);
   set_program_break(user_va_max);
   message("[runtime] Program break = %p\n", user_va_max);
 

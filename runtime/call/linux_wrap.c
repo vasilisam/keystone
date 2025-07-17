@@ -101,11 +101,15 @@ uintptr_t linux_uname(void* buf){
 
 uintptr_t syscall_munmap(void *addr, size_t length){
   uintptr_t ret = (uintptr_t)((void*)-1);
-
-  free_pages(vpn((uintptr_t)addr), length/RISCV_PAGE_SIZE);
+#ifdef MEGAPAGE_MAPPING
+  free_pages(vpn((uintptr_t)addr), MEGAPAGE_UP(length)/RISCV_MEGAPAGE_SIZE, true);
+#else
+  free_pages(vpn((uintptr_t)addr), length/RISCV_PAGE_SIZE, false);
+#endif
   ret = 0;
   tlb_flush();
-  printf("munmapped is called for %zu pages.\n", length/RISCV_PAGE_SIZE);
+  message("[runtime] munmapped was called.\n");
+  print_page_table(root_page_table, 1, 0);
   return ret;
 }
 
@@ -128,38 +132,55 @@ uintptr_t syscall_mmap(void *addr, size_t length, int prot, int flags,
   if(prot & PROT_EXEC)
     pte_flags |= PTE_X;
 
+  bool is_megapage = false;
 
-
+#ifdef MEGAPAGE_MAPPING
   // Find a continuous VA space that will fit the req. size
-  int req_pages = vpn(PAGE_UP(length));
+  int req_pages = vpn(MEGAPAGE_UP(length));
+  is_megapage = true;
 
   // Do we have enough available phys pages?
-  if( req_pages > spa_available()){
+  //divide by 2^9 = 512 to get the required 2MiB megapages
+  if ((req_pages >> RISCV_PT_INDEX_BITS) > spa_megapages_available()){
     goto done;
   }
+#else
+  int req_pages = vpn(PAGE_UP(length));
 
-  // Start looking at EYRIE_ANON_REGION_START for VA space
-  uintptr_t starting_vpn = vpn(EYRIE_ANON_REGION_START);
+  if (req_pages > spa_available()){
+    goto done;
+  }
+#endif
+
   uintptr_t valid_pages;
-  while((starting_vpn + req_pages) <= EYRIE_ANON_REGION_END){
+  // Start looking at  EYRIE_ANON_REGION_START for VA space
+  uintptr_t starting_vpn = vpn(EYRIE_ANON_REGION_START);
+
+  while((starting_vpn + req_pages) <= vpn(EYRIE_ANON_REGION_END)){
     valid_pages = test_va_range(starting_vpn, req_pages);
 
     if(req_pages == valid_pages){
+      if (is_megapage) req_pages = req_pages >> RISCV_PT_INDEX_BITS;  // #required 2MiB megapages
       // Set a successful value if we allocate
       // TODO free partial allocation on failure
-      if(alloc_pages(starting_vpn, req_pages, pte_flags, 0) == req_pages){
+      if(alloc_pages(starting_vpn, req_pages, pte_flags, is_megapage) == req_pages)
+      {
         ret = starting_vpn << RISCV_PAGE_BITS;
       }
       break;
     }
-    else
-      starting_vpn += valid_pages + 1;
+    else {
+      starting_vpn = (!is_megapage) \
+                   ? starting_vpn + valid_pages + 1 \
+                   : vpn(MEGAPAGE_UP((starting_vpn + valid_pages + 1) << RISCV_PAGE_BITS));
+    }
   }
 
  done:
   tlb_flush();
-  printf("[runtime] [mmap]: addr: 0x%p, length %lu, prot 0x%x, flags 0x%x, fd %i, offset %lu (%li pages %x) = 0x%p\r\n", addr, length, prot, flags, fd, offset, req_pages, pte_flags, ret);
-
+  message("[runtime] [mmap]: addr: 0x%p, length %lu, prot 0x%x, flags 0x%x, fd %i, offset %lu (%li pages %x) = 0x%p\r\n", addr, length, prot, flags, fd, offset, req_pages, pte_flags, ret);
+  print_page_table(root_page_table, 1, 0);
+  
   // If we get here everything went wrong
   return ret;
 }
@@ -258,7 +279,8 @@ uintptr_t syscall_brk(void* addr){
 
  done:
   tlb_flush();
-  printf("[runtime] brk (0x%p) (req pages %i) = 0x%p, curr break = 0x%p\r\n",req_break, req_page_count, ret, get_program_break());
+  message("[runtime] brk (0x%p) (req pages %i) = 0x%p, curr break = 0x%p\r\n",req_break, req_page_count, ret, get_program_break());
+  print_page_table(root_page_table, 1, 0);
   return ret;
 
 }

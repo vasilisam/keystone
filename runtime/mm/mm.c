@@ -14,10 +14,16 @@ static uintptr_t current_program_break;
 /* This is a function that walks the page table hierarchy, 
    prints PTEs if print_pt == true and also stores the 
    highest virtual memory address used in max_va pointer */
-void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, uintptr_t *va_max) {
+void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, uintptr_t *va_max, bool* is_empty) {
   for (int i = 0; i < 512; i++) {
     if (!(table[i] & PTE_V)) continue;
     
+    // We found the first valid PTE -> the page table isn't empty. Return.
+    if (is_empty) {
+      *is_empty = false;
+      break;
+    }
+
     uintptr_t vpn = vbase | (uintptr_t)i << RISCV_GET_LVL_PGSIZE_BITS(level);
 
     if (table[i] & (PTE_R | PTE_W | PTE_X)) {  
@@ -42,15 +48,26 @@ void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, ui
         message("L%d: VPN = 0x%03x -> PTE 0x%lx ", level, i, table[i]);
         message("-> Next table @ PA 0x%lx (VA %p)\n", next_table_pa, next_table);
       }
-      page_table_walker(next_table, level + 1, vpn, print_pt, va_max);
+      page_table_walker(next_table, level + 1, vpn, print_pt, va_max, is_empty);
     }
   }
 }
 
-uintptr_t find_max_user_va() {
+/* A function fthat returns the highest used virtual address
+  in userspace. Is is used to set properly the program break after
+  loading eapp elf. We deploy the function page_table_walker().*/
+uintptr_t find_max_user_va(pte* root_pt) {
   uintptr_t va_max = 0;
-  page_table_walker(root_page_table, 1, 0, false, &va_max);
+  page_table_walker(root_pt, 1, 0, false, &va_max, NULL);  //level of root_page_table = 1
   return va_max;
+}
+
+/* A function that checks whether a page table is free
+   of page table entries or not. */
+bool is_page_table_empty(pte* page_table, int page_table_level) {
+  bool is_empty = true;
+  page_table_walker(page_table, page_table_level, 0, false, NULL, &is_empty);
+  return is_empty;
 }
 
 uintptr_t get_program_break()
@@ -102,9 +119,9 @@ __walk_internal(pte* root, uintptr_t addr, int create, int page_table_levels)
 /* walk the page table and return PTE
  * return 0 if no mapping exists */
 static pte*
-__walk(pte* root, uintptr_t addr)
+__walk(pte* root, uintptr_t addr, int page_table_levels)
 {
-  return __walk_internal(root, addr, 0, 3);
+  return __walk_internal(root, addr, 0, page_table_levels);
 }
 
 /* walk the page table and return PTE
@@ -177,7 +194,7 @@ realloc_page(uintptr_t vpn, int flags)
 {
   assert(flags & PTE_U);
 
-  pte *pte = __walk(root_page_table, vpn << RISCV_PAGE_BITS);
+  pte *pte = __walk(root_page_table, vpn << RISCV_PAGE_BITS, 3);
   if(!pte)
     return 0;
 
@@ -190,10 +207,10 @@ realloc_page(uintptr_t vpn, int flags)
 }
 
 void
-free_page(uintptr_t vpn)
+free_page_generic(uintptr_t vpn, int page_table_levels)
 {
 
-  pte* pte = __walk(root_page_table, vpn << RISCV_PAGE_BITS);
+  pte* pte = __walk(root_page_table, vpn << RISCV_PAGE_BITS, page_table_levels);
 
   // No such PTE, or invalid
   if(!pte || !(*pte & PTE_V))
@@ -202,16 +219,23 @@ free_page(uintptr_t vpn)
   assert(*pte & PTE_U);
 
   uintptr_t ppn = pte_ppn(*pte);
-  // Mark invalid
-  // TODO maybe do more here
+  uintptr_t free_va = __va(ppn << RISCV_PAGE_BITS);
+  message("[runtime] Free ppn = %lx\n", ppn);
+  
+  // Mark page invalid and zero it out 
   *pte = 0;
 
 #ifdef USE_PAGING
   paging_dec_user_page();
 #endif
   // Return phys page
-  spa_put(__va(ppn << RISCV_PAGE_BITS), 1);
-
+  if(page_table_levels == 3) {
+    memset((void* )free_va, 0, RISCV_PAGE_SIZE);
+    spa_put(free_va, true);   //put page back to the 4KB-SPA
+  } else {
+    memset((void* )free_va, 0, RISCV_MEGAPAGE_SIZE);
+    spa_put(free_va, false);  //put page back to the 2MB-SPA
+  }
   return;
 
 }
@@ -225,7 +249,7 @@ alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage)
   for (i = 0; i < count; i++) {
     #ifdef MEGAPAGE_MAPPING
       if(is_megapage){
-        if(!alloc_megapage(vpn + i, flags))
+        if(!alloc_megapage(vpn + (i << RISCV_PT_INDEX_BITS) , flags))
         break;
       } else
     #endif
@@ -238,13 +262,36 @@ alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage)
   return i;
 }
 
+//free_pages is called by syscall munmap()
 void
-free_pages(uintptr_t vpn, size_t count){
+free_pages(uintptr_t vpn, size_t count, bool is_megapage){
+  // check if the page table can be freed 
+  uintptr_t start_vaddr = vpn << RISCV_PAGE_BITS;
+  pte* root_page_table_pte = pte_of_va(start_vaddr, 1);
+  uintptr_t page_table_pa = pte_ppn(*root_page_table_pte) << RISCV_PAGE_BITS;
+  pte* page_table_va = (pte*)__va(page_table_pa);
+  bool is_empty = is_page_table_empty(page_table_va, 2);  //level of page table = 2  
+  if (!is_empty)
+    printf("Page table at 0x%lx is not empty\n", page_table_pa);
   unsigned int i;
   for (i = 0; i < count; i++) {
-    free_page(vpn + i);
+#ifdef MEGAPAGE_MAPPING
+    if (is_megapage) {
+      free_megapage(vpn + (i << RISCV_PT_INDEX_BITS));
+    } else
+#endif
+    {
+      free_page(vpn + i);
+    }
   }
 
+  is_empty = is_page_table_empty(page_table_va, 2);  //level of page table = 2  
+  if (is_empty)
+    printf("Page table at 0x%lx is empty and can be freed\n", page_table_pa);
+  // Mark page invalid and zero it out
+  *root_page_table_pte = 0;
+  memset((void* )page_table_va, 0, RISCV_PAGE_SIZE);
+  spa_put((uintptr_t) page_table_va, true);   //put page back to the 4KB-SPA
 }
 
 /*
@@ -258,7 +305,7 @@ test_va_range(uintptr_t vpn, size_t count){
   unsigned int i;
   /* Validate the region */
   for (i = 0; i < count; i++) {
-    pte* pte = __walk_internal(root_page_table, (vpn+i) << RISCV_PAGE_BITS, 0, 3);
+    pte* pte = __walk_internal(root_page_table, (vpn+i) << RISCV_PAGE_BITS, 0, RISCV_PT_LEVELS);
     // If the page exists and is valid then we cannot use it
     if(pte && *pte){
       break;
@@ -271,7 +318,7 @@ test_va_range(uintptr_t vpn, size_t count){
 uintptr_t
 translate(uintptr_t va)
 {
-  pte* pte = __walk(root_page_table, va);
+  pte* pte = __walk(root_page_table, va, 3);
 
   if(pte && (*pte & PTE_V))
     return (pte_ppn(*pte) << RISCV_PAGE_BITS) | (RISCV_PAGE_OFFSET(va));
@@ -281,9 +328,9 @@ translate(uintptr_t va)
 
 /* try to retrieve PTE for a VA, return 0 if fail */
 pte*
-pte_of_va(uintptr_t va)
+pte_of_va(uintptr_t va, int page_table_levels)
 {
-  pte* pte = __walk(root_page_table, va);
+  pte* pte = __walk(root_page_table, va, page_table_levels);
   return pte;
 }
 
