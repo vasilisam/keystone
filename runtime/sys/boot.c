@@ -102,9 +102,9 @@ eyrie_boot(uintptr_t dummy, // $a0 contains the return value from the SBI
            uintptr_t utm_size)
 {
   #ifdef MEGAPAGE_MAPPING
-    message("[runtime] 2MiB megapages used for loading and executing the Eapp.\n");
+    message("[runtime] MAPPING MODE = 2MiB PAGES.\n");
   #else 
-    message("[runtime] 4KiB pages used for loading and executing the Eapp.\n");
+    message("[runtime] MAPPING MODE = 4KiB PAGES.\n");
   #endif
 
   /* set initial values */

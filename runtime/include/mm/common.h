@@ -41,8 +41,16 @@
 
 #endif
 
+
+/**
+ * message - Print a debugging message within runtime
+ * @format: format string
+ * @...: arguments for the format string
+ */
 #define USE_MESSAGE 1
 #ifdef USE_MESSAGE
 #define message(format, ...) \
   printf (format, ## __VA_ARGS__)
+#else 
+#define message(...)
 #endif

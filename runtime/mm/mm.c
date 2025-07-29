@@ -36,9 +36,8 @@ void page_table_walker(pte* table, int level, uintptr_t vbase, bool print_pt, ui
           *va_max = va_end;
       }
       if (print_pt) {
-        uintptr_t ppn = pte_ppn(table[i]);
         message("L%d: VPN = 0x%03x -> PTE 0x%lx ", level, i, table[i]);
-        message("-> PA 0x%lx\n", ppn << RISCV_PAGE_BITS);
+        message("-> PA 0x%lx\n", (pte_ppn(table[i])) << RISCV_PAGE_BITS);
       }
     } else {
       //if it's an intermediate page table
@@ -265,14 +264,6 @@ alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage)
 //free_pages is called by syscall munmap()
 void
 free_pages(uintptr_t vpn, size_t count, bool is_megapage){
-  // check if the page table can be freed 
-  uintptr_t start_vaddr = vpn << RISCV_PAGE_BITS;
-  pte* root_page_table_pte = pte_of_va(start_vaddr, 1);
-  uintptr_t page_table_pa = pte_ppn(*root_page_table_pte) << RISCV_PAGE_BITS;
-  pte* page_table_va = (pte*)__va(page_table_pa);
-  bool is_empty = is_page_table_empty(page_table_va, 2);  //level of page table = 2  
-  if (!is_empty)
-    printf("Page table at 0x%lx is not empty\n", page_table_pa);
   unsigned int i;
   for (i = 0; i < count; i++) {
 #ifdef MEGAPAGE_MAPPING
@@ -285,13 +276,19 @@ free_pages(uintptr_t vpn, size_t count, bool is_megapage){
     }
   }
 
-  is_empty = is_page_table_empty(page_table_va, 2);  //level of page table = 2  
-  if (is_empty)
-    printf("Page table at 0x%lx is empty and can be freed\n", page_table_pa);
-  // Mark page invalid and zero it out
-  *root_page_table_pte = 0;
-  memset((void* )page_table_va, 0, RISCV_PAGE_SIZE);
-  spa_put((uintptr_t) page_table_va, true);   //put page back to the 4KB-SPA
+  // check if the page table can be freed 
+  uintptr_t start_vaddr = vpn << RISCV_PAGE_BITS;
+  pte* root_page_table_pte = pte_of_va(start_vaddr, 1);   //level of root page table = 1
+  uintptr_t page_table_pa = pte_ppn(*root_page_table_pte) << RISCV_PAGE_BITS;
+  pte* page_table_va = (pte*)__va(page_table_pa);
+  // search for any valid PTEs in the page table
+  bool is_empty = is_page_table_empty(page_table_va, 2);  //level of page table = 2  
+  if (is_empty) {
+    // If the page tabel is empty -> Mark page invalid and zero it out
+    *root_page_table_pte = 0;
+    memset((void* )page_table_va, 0, RISCV_PAGE_SIZE);
+    spa_put((uintptr_t) page_table_va, true);   //put page back to the 4KB-SPA
+  }
 }
 
 /*

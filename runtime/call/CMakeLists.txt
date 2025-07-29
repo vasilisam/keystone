@@ -1,4 +1,6 @@
 
+set(MAPPING_MODE "2MB_PAGES")
+#set(MAPPING_MODE "4KB_PAGES")
 set(CALL_SOURCES sbi.c syscall.c)
 
 if(LINUX_SYSCALL)
@@ -14,4 +16,7 @@ if(NET_SYSCALL)
 endif()
 
 add_library(rt_call STATIC ${CALL_SOURCES})
-target_compile_definitions(rt_call PUBLIC MEGAPAGE_MAPPING)
+
+if(MAPPING_MODE STREQUAL "2MB_PAGES")
+    target_compile_definitions(rt_call PUBLIC MEGAPAGE_MAPPING)
+endif()
