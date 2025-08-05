@@ -58,6 +58,7 @@ int load_runtime(uintptr_t dummy,
  
   // initialize freemem
   spa_init(free_base, dram_base + dram_size - free_base);
+  message("[loader] FreeMemory = 0x%p - 0x%p\n", free_base, dram_base + dram_size);
 
   // validate runtime elf 
   size_t runtime_size = user_base - runtime_base;
@@ -82,7 +83,6 @@ int load_runtime(uintptr_t dummy,
     return ret;
   }
 
-  
   message("[loader] Runtime elf loading ends.\n");
   message("[loader] FreeMem: 0x%p\n", dram_base + dram_size - spa_available() * RISCV_PAGE_SIZE);
   
@@ -105,4 +105,3 @@ void error_and_exit() {
   message("[loader] FATAL: failed to load.\n");
   sbi_exit_enclave(-1);
 }
-

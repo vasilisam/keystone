@@ -53,6 +53,8 @@
 #define SATP_MODE_CHOICE INSERT_FIELD(0, SATP64_MODE, SATP_MODE_SV39)
 #define GIGAPAGE_SIZE (MEGAPAGE_SIZE << RISCV_PGLEVEL_BITS)
 
+#define GIGAPAGE_MAPPING 1
+
 //extern pte_t* root_page_table;
 
 static inline void flush_tlb(void)

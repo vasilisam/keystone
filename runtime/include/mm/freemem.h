@@ -13,7 +13,7 @@ struct pg_list
 {
 	uintptr_t head;
 	uintptr_t tail;
-	unsigned int count;
+	unsigned long count;
 };
 
 void spa_init_generic(uintptr_t base, size_t size, unsigned int page_bits);
@@ -24,8 +24,14 @@ uintptr_t spa_get_zero(void);
 uintptr_t spa_get_megapage(void);
 uintptr_t spa_get_zero_megapage(void);
 #define spa_init_megapage(base, size)  spa_init_generic(base, size, 21)
-unsigned int spa_megapages_available();
+unsigned long spa_megapages_available();
+#endif
+#ifdef GIGAPAGE_MAPPING
+uintptr_t spa_get_gigapage(void);
+uintptr_t spa_get_zero_gigapage(void);
+#define spa_init_gigapage(base, size)  spa_init_generic(base, size, 30)
+unsigned long spa_gigapages_available();
 #endif
 void spa_put(uintptr_t page, bool is_4K_allocator);
-unsigned int spa_available();
+unsigned long spa_available();
 #endif

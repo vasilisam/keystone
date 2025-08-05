@@ -19,6 +19,9 @@ static struct pg_list spa_free_pages;
 #ifdef MEGAPAGE_MAPPING
 static struct pg_list spa_free_megapages;
 #endif 
+#ifdef GIGAPAGE_MAPPING
+static struct pg_list spa_free_gigapages;
+#endif 
 
 /* get a free page from the simple page allocator */
 uintptr_t
@@ -30,6 +33,11 @@ __spa_get(bool zero, bool is_megapage)
 #ifdef MEGAPAGE_MAPPING
   if (is_megapage) {
     list = &spa_free_megapages;
+  } else
+#endif
+#ifdef GIGAPAGE_MAPPING
+  if (is_megapage) {
+    list = &spa_free_gigapages;
   } else
 #endif
   {
@@ -67,6 +75,13 @@ __spa_get(bool zero, bool is_megapage)
       memset((void*)free_page, 0, RISCV_MEGAPAGE_SIZE);
   } else
 #endif
+#ifdef GIGAPAGE_MAPPING
+  if (is_megapage) {
+    assert(free_page > EYRIE_LOAD_START && free_page < (freemem_va_start_1g  + freemem_size_1g));
+    if (zero)
+      memset((void*)free_page, 0, RISCV_GIGAPAGE_SIZE);
+  } else
+#endif
   {
     assert(free_page > EYRIE_LOAD_START && free_page < (freemem_va_start + freemem_size));
     if (zero)
@@ -89,12 +104,29 @@ uintptr_t spa_get_zero_megapage() {
  return  __spa_get(true, 1);
 }
 
-unsigned int
+unsigned long
 spa_megapages_available(){
 #ifndef USE_PAGING
   return spa_free_megapages.count;
 #else
   return spa_free_megapages.count + paging_remaining_pages();
+#endif
+}
+#endif
+
+#ifdef GIGAPAGE_MAPPING
+uintptr_t spa_get_gigapage() { return __spa_get(false, 1); }
+
+uintptr_t spa_get_zero_gigapage() {
+ return  __spa_get(true, 1);
+}
+
+unsigned long
+spa_gigapages_available(){
+#ifndef USE_PAGING
+  return spa_free_gigapages.count;
+#else
+  return spa_free_gigapages.count + paging_remaining_pages();
 #endif
 }
 #endif
@@ -111,6 +143,13 @@ spa_put(uintptr_t page_addr, bool is_4K_allocator)
     assert(IS_ALIGNED(page_addr, RISCV_MEGAPAGE_BITS));
     assert(page_addr >= EYRIE_LOAD_START && page_addr < (freemem_va_start_2m  + freemem_size_2m));
     list = &spa_free_megapages;
+  } else
+#endif
+#ifdef GIGAPAGE_MAPPING
+  if (!is_4K_allocator) {
+    assert(IS_ALIGNED(page_addr, RISCV_GIGAPAGE_BITS));
+    assert(page_addr >= EYRIE_LOAD_START && page_addr < (freemem_va_start_1g  + freemem_size_1g));
+    list = &spa_free_gigapages;
   } else
 #endif
   {
@@ -134,7 +173,7 @@ spa_put(uintptr_t page_addr, bool is_4K_allocator)
   return;
 }
 
-unsigned int
+unsigned long
 spa_available(){
 #ifndef USE_PAGING
   return spa_free_pages.count;
@@ -155,15 +194,19 @@ spa_init_generic(uintptr_t base, size_t size, unsigned int page_bits)
     is_4K_allocator = false;
   } else
 #endif
+#ifdef GIGAPAGE_MAPPING
+  if (page_bits == RISCV_GIGAPAGE_BITS) {
+    LIST_INIT(spa_free_gigapages);
+    is_4K_allocator = false;
+  } else
+#endif
   {
     LIST_INIT(spa_free_pages);
   }
 
   // both base and size must be page-aligned
   assert(IS_ALIGNED(base, page_bits));
-
-  //TODO Free Memory size isn't always 2MiB-aligned
-  assert(IS_ALIGNED(size, RISCV_PAGE_BITS));
+  assert(IS_ALIGNED(size, page_bits));
 
   /* put all free pages in freemem (base) into spa_free_pages */
   for(cur = base;

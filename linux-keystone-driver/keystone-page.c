@@ -28,7 +28,7 @@ int epm_destroy(struct epm* epm) {
 }
 
 /* Create an EPM and initialize the free list */
-int epm_init(struct epm* epm, unsigned int min_pages)
+int epm_init(struct epm* epm, unsigned long min_pages)
 {
   vaddr_t epm_vaddr = 0;
   unsigned long order = 0;
@@ -52,13 +52,27 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   /* If buddy allocator fails, we fall back to the CMA */
   if (!epm_vaddr) {
     epm->is_cma = 1;
-    pr_info("EPM is allocated within CMA");
+    pr_info("[Driver] EPM is allocated within CMA");
+  #if defined(MEGAPAGE_MAPPING)
+  /* When using megapages, count*PAGE_SIZE should be 2MB-aligned for
+   * the Free-Memory region's  end to have the same alignment. 
+   */
+  count = MEGAPAGE_UP(min_pages << PAGE_SHIFT) >> PAGE_SHIFT;
+  #elif defined(GIGAPAGE_MAPPING)
+  /* FreeMemory region's end address should be 1-GiB aligned as well */
+  count = GIGAPAGE_UP(min_pages << PAGE_SHIFT) >> PAGE_SHIFT;
+  #else
     count = min_pages;
+  #endif
+    /*epm_vaddr = (vaddr_t) dma_alloc_coherent(keystone_dev.this_device,
+      count << PAGE_SHIFT,
+      &device_phys_addr,
+      GFP_KERNEL | __GFP_DMA32);*/
 
     epm_vaddr = (vaddr_t) dma_alloc_coherent(keystone_dev.this_device,
       count << PAGE_SHIFT,
       &device_phys_addr,
-      GFP_KERNEL | __GFP_DMA32);
+      GFP_KERNEL);
 
     if(!device_phys_addr)
       epm_vaddr = 0;
@@ -77,6 +91,7 @@ int epm_init(struct epm* epm, unsigned int min_pages)
   epm->pa = (epm->is_cma) ? device_phys_addr : __pa(epm_vaddr);
   epm->order = order;
   epm->size = count << PAGE_SHIFT;
+  pr_info("[Driver] EPM is %lu pages long", count);
   epm->ptr = epm_vaddr;
 
   return 0;

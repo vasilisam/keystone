@@ -27,10 +27,15 @@ extern uintptr_t program_break;
 extern uintptr_t freemem_va_start;
 extern size_t freemem_size;
 
-#ifdef MEGAPAGE_MAPPING
+#if defined(MEGAPAGE_MAPPING)
 extern uintptr_t free_2m;
 extern uintptr_t freemem_va_start_2m;
 extern uintptr_t freemem_size_2m;
+#endif
+#if defined(GIGAPAGE_MAPPING)
+extern uintptr_t free_1g;
+extern uintptr_t freemem_va_start_1g;
+extern uintptr_t freemem_size_1g;
 #endif
 
 /* shared buffer */

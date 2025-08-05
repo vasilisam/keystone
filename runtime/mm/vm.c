@@ -56,6 +56,13 @@ uintptr_t freemem_va_start_2m;
 uintptr_t freemem_size_2m;
 #endif
 
+#ifdef GIGAPAGE_MAPPING
+uintptr_t free_1g;
+uintptr_t freemem_va_start_1g;
+uintptr_t freemem_size_1g;
+#endif
+
+
 /* shared buffer */
 uintptr_t shared_buffer;
 uintptr_t shared_buffer_size;

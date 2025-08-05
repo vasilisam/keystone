@@ -29,23 +29,30 @@
 #define PAGE_UP(n) ROUND_UP(n, RISCV_PAGE_BITS)
 
 //Macros for implementing 2MiB MEGAPAGEs 
-#define MEGAPAGE_MAPPING 1
-#ifdef  MEGAPAGE_MAPPING
-#define RISCV_MEGAPAGE_BITS RISCV_GET_LVL_PGSIZE_BITS(2)
+//#define MEGAPAGE_MAPPING 1
+#define RISCV_MEGAPAGE_BITS 21
 #define RISCV_MEGAPAGE_SIZE (1 << RISCV_MEGAPAGE_BITS)
 #define RISCV_MEGAPAGE_OFFSET(addr) (addr % RISCV_MEGAPAGE_SIZE)
 #define MEGAPAGE_DOWN(n) ROUND_DOWN(n, RISCV_GET_LVL_PGSIZE_BITS(2))
 #define MEGAPAGE_UP(n) ROUND_UP(n, RISCV_GET_LVL_PGSIZE_BITS(2))
-#endif
 
-/* Starting address of the enclave memory */
+//Macros for implementing GIGAPEGS 
+#define GIGAPAGE_MAPPING 1
+#define RISCV_GIGAPAGE_BITS 30
+#define RISCV_GIGAPAGE_SIZE (1 << RISCV_GIGAPAGE_BITS)
+#define RISCV_GIGAPAGE_OFFSET(addr) (addr % RISCV_GIGAPAGE_SIZE)
+#define GIGAPAGE_DOWN(n) ROUND_DOWN(n, RISCV_GET_LVL_PGSIZE_BITS(1))
+#define GIGAPAGE_UP(n) ROUND_UP(n, RISCV_GET_LVL_PGSIZE_BITS(1))
 
 #if __riscv_xlen == 64
 #define RUNTIME_VA_START 0xffffffffc0000000
-#define EYRIE_LOAD_START 0xffffffff00000000
+/* Starting address of the enclave memory */
+#define EYRIE_LOAD_START 0xffffffc000000000 //upper 256 GiB of virtual address space for EPM
+//#define EYRIE_LOAD_START 0xffffffff00000000
 #define EYRIE_PAGING_START 0xffffffff40000000
 #define EYRIE_UNTRUSTED_START 0xffffffff80000000
-#define EYRIE_USER_STACK_START 0x0000000040000000
+//Set Start of Stack 1GiB below the starting address of Anonymous Mappings Area
+#define EYRIE_USER_STACK_START 0x0000001fc0000000 
 #define EYRIE_ANON_REGION_START \
   0x0000002000000000  // Arbitrary VA to start looking for large mappings
 #elif __riscv_xlen == 32
@@ -59,8 +66,10 @@
 #endif
 
 #define EYRIE_ANON_REGION_END EYRIE_LOAD_START
-#ifdef MEGAPAGE_MAPPING
+#if defined(MEGAPAGE_MAPPING)
 #define EYRIE_USER_STACK_SIZE 0x200000  // make it 2MiB-aligned
+#elif defined(GIGAPAGE_MAPPING)
+#define EYRIE_USER_STACK_SIZE 0x40000000  // make it 1GiB-aligned
 #else
 #define EYRIE_USER_STACK_SIZE 0x20000
 #endif

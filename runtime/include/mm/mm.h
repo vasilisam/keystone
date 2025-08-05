@@ -23,9 +23,13 @@ void free_page_generic(uintptr_t vpn, int page_table_levels);
 #define alloc_megapage(vpn, flags)  alloc_page_generic(vpn, flags, 2) 
 #define free_megapage(vpn)          free_page_generic(vpn, 2)
 #endif
+#ifdef GIGAPAGE_MAPPING     //for 1GiB megapages we need a 1-page-table hierarchy
+#define alloc_gigapage(vpn, flags)  alloc_page_generic(vpn, flags, 1) 
+#define free_gigapage(vpn)          free_page_generic(vpn, 1)
+#endif
 uintptr_t realloc_page(uintptr_t vpn, int flags);
-size_t alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage);
-void free_pages(uintptr_t vpn, size_t count, bool is_megapage);
+size_t alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_largepage);
+void free_pages(uintptr_t vpn, size_t count, bool is_largepage);
 size_t test_va_range(uintptr_t vpn, size_t count);
 
 uintptr_t get_program_break();

@@ -169,6 +169,11 @@ alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels)
     page = spa_get_zero_megapage();
   } else
 #endif
+#ifdef GIGAPAGE_MAPPING 
+  if (page_table_levels == 1) {
+    page = spa_get_zero_gigapage();
+  } else
+#endif
   {
     page = spa_get_zero();
   }
@@ -178,6 +183,11 @@ alloc_page_generic(uintptr_t vpn, int flags, int page_table_levels)
 
 #ifdef MEGAPAGE_MAPPING 
   if (page_table_levels == 2)
+    message("[runtime] New PTE: 0x%lx at 0x%p\n", *pte, pte);
+#endif
+
+#ifdef GIGAPAGE_MAPPING
+  if (page_table_levels == 1)
     message("[runtime] New PTE: 0x%lx at 0x%p\n", *pte, pte);
 #endif
 
@@ -231,9 +241,16 @@ free_page_generic(uintptr_t vpn, int page_table_levels)
   if(page_table_levels == 3) {
     memset((void* )free_va, 0, RISCV_PAGE_SIZE);
     spa_put(free_va, true);   //put page back to the 4KB-SPA
-  } else {
+  } else if (page_table_levels == 2) {
+  #ifdef MEGAPAGE_MAPPING
     memset((void* )free_va, 0, RISCV_MEGAPAGE_SIZE);
     spa_put(free_va, false);  //put page back to the 2MB-SPA
+  #endif
+  } else {
+  #ifdef GIGAPAGE_MAPPING
+    memset((void* )free_va, 0, RISCV_GIGAPAGE_SIZE);
+    spa_put(free_va, false);  //put page back to the 1GB-SPA
+  #endif
   }
   return;
 
@@ -242,13 +259,19 @@ free_page_generic(uintptr_t vpn, int page_table_levels)
 /* allocate n new pages from a given vpn
  * returns the number of pages allocated */
 size_t
-alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage)
+alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_largepage)
 {
   unsigned int i;
   for (i = 0; i < count; i++) {
     #ifdef MEGAPAGE_MAPPING
-      if(is_megapage){
-        if(!alloc_megapage(vpn + (i << RISCV_PT_INDEX_BITS) , flags))
+      if(is_largepage){
+        if(!alloc_megapage(vpn + (i << RISCV_PT_INDEX_BITS), flags))
+        break;
+      } else
+    #endif
+    #ifdef GIGAPAGE_MAPPING
+      if(is_largepage){
+        if(!alloc_gigapage(vpn + (i << 2 * RISCV_PT_INDEX_BITS), flags))
         break;
       } else
     #endif
@@ -263,12 +286,17 @@ alloc_pages(uintptr_t vpn, size_t count, int flags, bool is_megapage)
 
 //free_pages is called by syscall munmap()
 void
-free_pages(uintptr_t vpn, size_t count, bool is_megapage){
+free_pages(uintptr_t vpn, size_t count, bool is_largepage){
   unsigned int i;
   for (i = 0; i < count; i++) {
 #ifdef MEGAPAGE_MAPPING
-    if (is_megapage) {
+    if (is_largepage) {
       free_megapage(vpn + (i << RISCV_PT_INDEX_BITS));
+    } else
+#endif
+#ifdef GIGAPAGE_MAPPING
+    if (is_largepage) {
+      free_gigapage(vpn + (i << 2 * RISCV_PT_INDEX_BITS));
     } else
 #endif
     {
@@ -276,7 +304,9 @@ free_pages(uintptr_t vpn, size_t count, bool is_megapage){
     }
   }
 
-  // check if the page table can be freed 
+  // Check if the page table can be freed. Of course, don't check for it in
+  // case of 1 GiB mappings where only root page table is being populated.
+#ifndef GIGAPAGE_MAPPING
   uintptr_t start_vaddr = vpn << RISCV_PAGE_BITS;
   pte* root_page_table_pte = pte_of_va(start_vaddr, 1);   //level of root page table = 1
   uintptr_t page_table_pa = pte_ppn(*root_page_table_pte) << RISCV_PAGE_BITS;
@@ -289,6 +319,7 @@ free_pages(uintptr_t vpn, size_t count, bool is_megapage){
     memset((void* )page_table_va, 0, RISCV_PAGE_SIZE);
     spa_put((uintptr_t) page_table_va, true);   //put page back to the 4KB-SPA
   }
+#endif
 }
 
 /*
@@ -381,22 +412,36 @@ __map_with_reserved_page_table_64(uintptr_t dram_base,
   uintptr_t offset = 0;
   uintptr_t leaf_level = 3;
   pte* leaf_pt = l3_pt;
-  /* use megapage if l3_pt is null */
-  if (!l3_pt) {
+  /* use megapage if l3_pt is null and l2_pt is not null */
+  if (!l3_pt && l2_pt) {
     leaf_level = 2;
     leaf_pt = l2_pt;
   }
   
+  /* use gigapage if l3_pt is null and l2_pt is null */
+  if (!l3_pt && !l2_pt) {
+    leaf_level = 1;
+    leaf_pt = root_page_table;
+  }
+
   assert(dram_size <= RISCV_GET_LVL_PGSIZE(leaf_level - 1));
   assert(IS_ALIGNED(dram_base, RISCV_GET_LVL_PGSIZE_BITS(leaf_level)));
-  assert(IS_ALIGNED(ptr, RISCV_GET_LVL_PGSIZE_BITS(leaf_level - 1)));
+  // Starting Virtual address (ptr) needs to be ckecked only for 1GiB-alignement
+  // in case where root page table is the leaf page table 
+  if (leaf_level == 1) {
+    assert(IS_ALIGNED(ptr, RISCV_GET_LVL_PGSIZE_BITS(1)));
+  } else { 
+    assert(IS_ALIGNED(ptr, RISCV_GET_LVL_PGSIZE_BITS(leaf_level - 1)));
+  }
 
-  /* set root page table entry */
-  root_page_table[RISCV_GET_PT_INDEX(ptr, 1)] =
-    ptd_create(ppn(kernel_va_to_pa(l2_pt)));
+  /* set root page table entry if it's not leaf */
+  if (leaf_pt != root_page_table) {
+    root_page_table[RISCV_GET_PT_INDEX(ptr, 1)] =
+      ptd_create(ppn(kernel_va_to_pa(l2_pt)));
+  }
 
   /* set L2 if it's not leaf */
-  if (leaf_pt != l2_pt) {
+  if (leaf_pt != root_page_table && leaf_pt != l2_pt) {
     l2_pt[RISCV_GET_PT_INDEX(ptr, 2)] =
       ptd_create(ppn(kernel_va_to_pa(l3_pt)));
   }
@@ -423,7 +468,9 @@ map_with_reserved_page_table(uintptr_t dram_base,
                              pte* l3_pt)
 {
   #if __riscv_xlen == 64
-  if (dram_size > RISCV_GET_LVL_PGSIZE(2)) {
+  if (dram_size > RISCV_GET_LVL_PGSIZE(1)) {
+    __map_with_reserved_page_table_64(dram_base, dram_size, ptr, 0, 0);
+  } else if (dram_size > RISCV_GET_LVL_PGSIZE(2)) {
     __map_with_reserved_page_table_64(dram_base, dram_size, ptr, l2_pt, 0);
   } else {
     __map_with_reserved_page_table_64(dram_base, dram_size, ptr, l2_pt, l3_pt);

@@ -26,7 +26,7 @@ int keystone_create_enclave(struct file *filep, unsigned long arg)
   /* Pass base page table */
   enclp->epm_paddr = enclave->epm->pa;
   enclp->epm_size = enclave->epm->size;
-  pr_info("Driver: EPM start: 0x%llx, size: %zu\n", enclave->epm->pa, enclave->epm->size);
+  pr_info("[Driver] EPM start: 0x%llx, size: %zu\n", enclave->epm->pa, enclave->epm->size);
 
   /* allocate UID */
   enclp->eid = enclave_idr_alloc(enclave);
@@ -74,7 +74,7 @@ int keystone_finalize_enclave(unsigned long arg)
   create_args.free_paddr = enclp->free_paddr;
   create_args.free_requested = enclp->free_requested;
 
-  pr_info("Driver: Runtime PA: 0x%lx, Eapp PA: 0x%lx, FreeMem PA: 0x%lx size %d B\n",\
+  pr_info("[Driver] Runtime PA: 0x%lx, Eapp PA: 0x%lx, FreeMem PA: 0x%lx size %llu B\n",\
           enclp->runtime_paddr, enclp->user_paddr, enclp->free_paddr, enclp->free_requested);
 
   ret = sbi_sm_create_enclave(&create_args);
@@ -98,7 +98,6 @@ error_destroy_enclave:
 
 int keystone_run_enclave(unsigned long data)
 {
-  pr_info("Driver: Run the Enclave\n");
   struct sbiret ret;
   unsigned long ueid;
   struct enclave* enclave;

@@ -23,6 +23,8 @@
 #include "riscv64.h"
 
 #define PAGE_UP(addr)	(((addr)+((PAGE_SIZE)-1))&(~((PAGE_SIZE)-1)))
+#define MEGAPAGE_UP(addr)	(((addr)+((MEGAPAGE_SIZE)-1))&(~((MEGAPAGE_SIZE)-1)))
+#define GIGAPAGE_UP(addr)	(((addr)+((GIGAPAGE_SIZE)-1))&(~((GIGAPAGE_SIZE)-1)))
 
 typedef uintptr_t vaddr_t;
 typedef uintptr_t paddr_t;
@@ -85,7 +87,7 @@ static inline uintptr_t  epm_satp(struct epm* epm) {
 }
 
 int epm_destroy(struct epm* epm);
-int epm_init(struct epm* epm, unsigned int count);
+int epm_init(struct epm* epm, unsigned long count);
 int utm_destroy(struct utm* utm);
 int utm_init(struct utm* utm, size_t untrusted_size);
 paddr_t epm_va_to_pa(struct epm* epm, vaddr_t addr);

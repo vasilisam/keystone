@@ -101,8 +101,10 @@ uintptr_t linux_uname(void* buf){
 
 uintptr_t syscall_munmap(void *addr, size_t length){
   uintptr_t ret = (uintptr_t)((void*)-1);
-#ifdef MEGAPAGE_MAPPING
+#if defined(MEGAPAGE_MAPPING)
   free_pages(vpn((uintptr_t)addr), MEGAPAGE_UP(length)/RISCV_MEGAPAGE_SIZE, true);
+#elif defined(GIGAPAGE_MAPPING)
+  free_pages(vpn((uintptr_t)addr), GIGAPAGE_UP(length)/RISCV_GIGAPAGE_SIZE, true);
 #else
   free_pages(vpn((uintptr_t)addr), length/RISCV_PAGE_SIZE, false);
 #endif
@@ -132,20 +134,30 @@ uintptr_t syscall_mmap(void *addr, size_t length, int prot, int flags,
   if(prot & PROT_EXEC)
     pte_flags |= PTE_X;
 
-  bool is_megapage = false;
+  bool is_largepage = false;
 
-#ifdef MEGAPAGE_MAPPING
+#if defined(MEGAPAGE_MAPPING)
   // Find a continuous VA space that will fit the req. size
-  int req_pages = vpn(MEGAPAGE_UP(length));
-  is_megapage = true;
+  unsigned long req_pages = vpn(MEGAPAGE_UP(length));
+  is_largepage = true;
 
   // Do we have enough available phys pages?
   //divide by 2^9 = 512 to get the required 2MiB megapages
   if ((req_pages >> RISCV_PT_INDEX_BITS) > spa_megapages_available()){
     goto done;
   }
+#elif defined(GIGAPAGE_MAPPING)
+  // Find a continuous VA space that will fit the req. size
+  unsigned long req_pages = vpn(GIGAPAGE_UP(length));
+  is_largepage = true;
+
+  // Do we have enough available phys pages?
+  //divide by 2^18 to get the required 1GiB pages
+  if ((req_pages >> 2 * RISCV_PT_INDEX_BITS) > spa_gigapages_available()){
+    goto done;
+  }
 #else
-  int req_pages = vpn(PAGE_UP(length));
+  unsigned long req_pages = vpn(PAGE_UP(length));
 
   if (req_pages > spa_available()){
     goto done;
@@ -160,25 +172,37 @@ uintptr_t syscall_mmap(void *addr, size_t length, int prot, int flags,
     valid_pages = test_va_range(starting_vpn, req_pages);
 
     if(req_pages == valid_pages){
-      if (is_megapage) req_pages = req_pages >> RISCV_PT_INDEX_BITS;  // #required 2MiB megapages
+      if (is_largepage) {
+      #ifdef MEGAPAGE_MAPPING
+        req_pages = req_pages >> RISCV_PT_INDEX_BITS;  // #required 2MiB megapages
+      #else
+        req_pages = req_pages >> 2 * RISCV_PT_INDEX_BITS;
+      #endif
+      }
       // Set a successful value if we allocate
       // TODO free partial allocation on failure
-      if(alloc_pages(starting_vpn, req_pages, pte_flags, is_megapage) == req_pages)
+      if(alloc_pages(starting_vpn, req_pages, pte_flags, is_largepage) == req_pages)
       {
         ret = starting_vpn << RISCV_PAGE_BITS;
       }
       break;
     }
     else {
-      starting_vpn = (!is_megapage) \
-                   ? starting_vpn + valid_pages + 1 \
-                   : vpn(MEGAPAGE_UP((starting_vpn + valid_pages + 1) << RISCV_PAGE_BITS));
+        if(!is_largepage) {
+          starting_vpn = starting_vpn + valid_pages + 1;
+        } else {
+          #ifdef MEGAPAGE_MAPPING
+            starting_vpn = vpn(MEGAPAGE_UP((starting_vpn + valid_pages + 1) << RISCV_PAGE_BITS));
+          #else
+            starting_vpn = vpn(GIGAPAGE_UP((starting_vpn + valid_pages + 1) << RISCV_PAGE_BITS));
+          #endif
+        }
     }
   }
 
  done:
   tlb_flush();
-  message("[runtime] [mmap]: addr: 0x%p, length %lu, prot 0x%x, flags 0x%x, fd %i, offset %lu (%li pages %x) = 0x%p\r\n", addr, length, prot, flags, fd, offset, req_pages, pte_flags, ret);
+  message("[runtime] [mmap]: addr: 0x%p, length %lu, prot 0x%x, flags 0x%x, fd %i, offset %lu (%lu pages %x) = 0x%p\r\n", addr, length, prot, flags, fd, offset, req_pages, pte_flags, ret);
   print_page_table(root_page_table, 1, 0);
   
   // If we get here everything went wrong
@@ -216,8 +240,8 @@ uintptr_t syscall_brk(void* addr){
 
   uintptr_t current_break = get_program_break();
   uintptr_t ret = -1;
-  int req_page_count = 0;
-  bool is_megapage = false;
+  unsigned long req_page_count = 0;
+  bool is_largepage = false;
 
   // Return current break if null or current break
   if (req_break == 0) {
@@ -234,7 +258,7 @@ uintptr_t syscall_brk(void* addr){
 
 #ifdef MEGAPAGE_MAPPING
   //Pack smaller allocations into existing megapages until a new one is needed
-  is_megapage = true;
+  is_largepage = true;
 
   req_page_count = (MEGAPAGE_UP(req_break) - current_break) / RISCV_MEGAPAGE_SIZE;
   if (spa_megapages_available() < req_page_count){
@@ -244,7 +268,30 @@ uintptr_t syscall_brk(void* addr){
   //Align current break to a 2MiB-aligned address for correct 2MiB-mapping creation
   if( alloc_pages(vpn(MEGAPAGE_UP(current_break)),
                   req_page_count,
-                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_megapage)
+                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_largepage)
+      != req_page_count){
+    goto done;
+  }
+
+  // Keep program break still page-aligned for minimum memory waste.
+  // Page permissions remain the same among brk calls
+  set_program_break(PAGE_UP(req_break));
+  ret = req_break;
+  goto done;
+#endif
+
+#ifdef GIGAPAGE_MAPPING
+  is_largepage = true;
+
+  req_page_count = (GIGAPAGE_UP(req_break) - current_break) / RISCV_GIGAPAGE_SIZE;
+  if (spa_gigapages_available() < req_page_count){
+    goto done;
+  }
+
+  //Align current break to a 1GiB-aligned address for correct 1GiB-mapping creation
+  if( alloc_pages(vpn(GIGAPAGE_UP(current_break)),
+                  req_page_count,
+                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_largepage)
       != req_page_count){
     goto done;
   }
@@ -267,7 +314,7 @@ uintptr_t syscall_brk(void* addr){
   // TODO free pages on failure
   if( alloc_pages(vpn(current_break),
                   req_page_count,
-                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_megapage)
+                  PTE_W | PTE_R | PTE_D | PTE_U | PTE_A, is_largepage)
       != req_page_count){
     goto done;
   }
@@ -279,7 +326,7 @@ uintptr_t syscall_brk(void* addr){
 
  done:
   tlb_flush();
-  message("[runtime] brk (0x%p) (req pages %i) = 0x%p, curr break = 0x%p\r\n",req_break, req_page_count, ret, get_program_break());
+  message("[runtime] brk (0x%p) (req pages %lu) = 0x%p, curr break = 0x%p\r\n",req_break, req_page_count, ret, get_program_break());
   print_page_table(root_page_table, 1, 0);
   return ret;
 
